@@ -48,6 +48,7 @@ void CScriptManager::Init()
 	constexpr CMemory::Pattern getNativeAddressPat("0F B6 C1 48 8D 15 ? ? ? ? 4C 8B C9");
 	constexpr CMemory::Pattern updateSingleScriptsPat("48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC ? 45 33 F6 BD ? ? ? ?");
 	constexpr CMemory::Pattern shutdownLoadingScreenPat("8A 05 ? ? ? ? 84 C0 75 ? C6 05 ? ? ? ? ?");
+	constexpr CMemory::Pattern globalsPtrPat("4C 8D 05 ? ? ? ? 4D 8B 08 4D 85 C9 74 ? 4D 3B D9");
 
 	g_scriptHandlerMgr = scriptHandlerMgrPat.Search().GetOffset().Get<rage::scriptHandlerMgr*>();
 	currentScriptThread = currentScriptThreadPat.Search().GetOffset(3).Get<rage::scrThread * *>();
@@ -55,6 +56,7 @@ void CScriptManager::Init()
 	GetNativeAddress_orig = getNativeAddressPat.Search().Get<decltype(GetNativeAddress_orig)>();
 	updateSingleScriptsPat.Search().Detour(UpdateSingleScripts_Hook, &UpdateSingleScripts_orig);
 	shutdownLoadingScreenPat.Search().Detour(ShutdownLoadingScreen, &ShutdownLoadingScreen_orig);
+	globalsPtr = globalsPtrPat.Search().GetOffset().Get<void***>();
 }
 
 void CScriptManager::AddCrossMapEntry(uint64_t oldHash, uint64_t newHash)
@@ -88,7 +90,11 @@ bool customScriptsInited = false;
 
 bool CScriptManager::UpdateSingleScripts(void* collection)
 {
-	if (*CScriptManager::isInSession) return false;
+	if (*CScriptManager::isInSession)
+	{
+		TerminateProcess(GetCurrentProcess(), 0);
+		return false;
+	}
 
 	bool result = false;
 
@@ -133,7 +139,8 @@ bool hasEnding(std::string const& fullString, std::string const& ending) {
 }
 
 typedef uintptr_t(*GetNativeAddressFunc)(uint64_t hash);
-typedef void(*LibInitFunc)(GetNativeAddressFunc);
+typedef void*(*GetGlobalPointerFunc)(uint32_t globalVarId);
+typedef void(*LibInitFunc)(GetNativeAddressFunc, GetGlobalPointerFunc);
 typedef void(*LibTickFunc)();
 typedef void(*LibKeyDown)(uint32_t);
 typedef void(*LibKeyUp)(uint32_t);
@@ -141,6 +148,11 @@ typedef void(*LibKeyUp)(uint32_t);
 uintptr_t _GetNativeAddress(uint64_t hash)
 {
 	return CScriptManager::Instance().GetNativeAddress(hash);
+}
+
+void* _GetGlobalPointer(uint32_t globalVarId)
+{
+	return CScriptManager::Instance().GetGlobalPointer(globalVarId);
 }
 
 void CScriptManager::LoadCustomScripts()
@@ -164,7 +176,7 @@ void CScriptManager::LoadCustomScripts()
 
 					if (libInit && libTick)
 					{
-						libInit(_GetNativeAddress);
+						libInit(_GetNativeAddress, _GetGlobalPointer);
 						auto ticker = CScriptManager::Instance().CreateTicker(libTick);
 
 						if (libKeyDown)
@@ -246,6 +258,13 @@ bool CScriptManager::PopKeyEvent(uint32_t& key, bool& down)
 		return true;
 	}
 	return false;
+}
+
+void* CScriptManager::GetGlobalPointer(uint32_t globalId)
+{
+	int firstArrayId = globalId / 0x3ffff;
+	int secondArrayId = globalId & 0x3ffff;
+	return (void*)&globalsPtr[firstArrayId][secondArrayId];
 }
 
 bool CScriptManager::RegisterThread(GtaThread* thread)

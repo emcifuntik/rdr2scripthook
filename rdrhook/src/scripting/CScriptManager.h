@@ -67,6 +67,7 @@ private:
 	std::mutex keyQueue;
 	bool needReceiveEvents = false;
 	std::wstring wClientPath;
+	void*** globalsPtr = nullptr;
 public:
 	bool scriptCanBeStarted;
 
@@ -118,6 +119,8 @@ public:
 
 	void PushKeyEvent(uint32_t key, bool down);
 	bool PopKeyEvent(uint32_t& key, bool& down);
+
+	void* GetGlobalPointer(uint32_t globalId);
 
 private:
 	bool RegisterThread(GtaThread* thread);
