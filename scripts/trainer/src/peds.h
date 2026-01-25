@@ -1010,4 +1010,4 @@ const char* pedsArray[] = {
   "u_m_y_htlworker_02",
   "u_m_y_shackstarvingkid_01",
   "u_m_y_shackstarvingkid_02"
-}
+};

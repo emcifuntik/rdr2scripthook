@@ -9,7 +9,12 @@
 #include "scriptHandlerMgr.h"
 #include "CSingleton.h"
 #include "scrThread.h"
-#include <alt-log.h>
+
+// Forward declarations for JavaScript support
+namespace rdr2js {
+    class JSRuntime;
+    class ModLoader;
+}
 
 class CScriptManager: public CSingleton<CScriptManager>
 {
@@ -68,6 +73,7 @@ private:
 	bool needReceiveEvents = false;
 	std::wstring wClientPath;
 	void*** globalsPtr = nullptr;
+	bool jsModsLoaded = false;
 public:
 	bool scriptCanBeStarted;
 
@@ -110,11 +116,15 @@ public:
 
 	void AddCrossMapEntry(uint64_t oldHash, uint64_t newHash);
 	uintptr_t GetNativeAddress(uint64_t hash);
-	
+
 	void HookWinApi();
 	bool UpdateGtaScript(GtaThread* thread, int ticksCount);
 	bool UpdateSingleScripts(void* collection);
 	void LoadCustomScripts();
+	void LoadJavaScriptMods();
+	void UpdateJavaScriptMods();
+	void OnJSKeyDown(uint32_t key);
+	void OnJSKeyUp(uint32_t key);
 	LRESULT APIENTRY WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 
 	void PushKeyEvent(uint32_t key, bool down);

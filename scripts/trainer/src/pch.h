@@ -8,10 +8,9 @@
 #include "core/Hash.h"
 #include "core/NativeEngine.h"
 #include "core/NativeNames.h"
-#include "alt-log.h"
+
+#include <windows.h>
 
 #define DLL_EXPORT __declspec(dllexport)
-
-using namespace alt;
 
 #endif //PCH_H

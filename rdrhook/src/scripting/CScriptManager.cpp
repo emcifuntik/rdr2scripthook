@@ -1,5 +1,8 @@
 #include "stdafx.h"
 #include "CScriptManager.h"
+#include "js/JSRuntime.h"
+#include "js/ModLoader.h"
+#include "Logger.h"
 
 bool(*UpdateSingleScripts_orig)(void*) = nullptr;
 bool UpdateSingleScripts_Hook(void* collection)
@@ -45,7 +48,7 @@ void CScriptManager::Init()
 	constexpr CMemory::Pattern scriptHandlerMgrPat("48 8D 0D ? ? ? ? E8 ? ? ? ? 84 C0 75 ? 8B 8B ? ? ? ?");
 	constexpr CMemory::Pattern currentScriptThreadPat("48 39 1D ? ? ? ? 75 ? 48 8D 05 ? ? ? ?");
 	constexpr CMemory::Pattern isInSessionPat("80 3D ? ? ? ? ? 74 ? 48 8B 0D ? ? ? ? E8 ? ? ? ? 0F B6 40 ?");
-	constexpr CMemory::Pattern getNativeAddressPat("0F B6 C1 48 8D 15 ? ? ? ? 4C 8B C9");
+	constexpr CMemory::Pattern getNativeAddressPat("48 8B 15 ? ? ? ? 4C 8B C9 49 F7 D1");
 	constexpr CMemory::Pattern updateSingleScriptsPat("48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC ? 45 33 F6 BD ? ? ? ?");
 	constexpr CMemory::Pattern shutdownLoadingScreenPat("8A 05 ? ? ? ? 84 C0 75 ? C6 05 ? ? ? ? ?");
 	constexpr CMemory::Pattern globalsPtrPat("4C 8D 05 ? ? ? ? 4D 8B 08 4D 85 C9 74 ? 4D 3B D9");
@@ -119,6 +122,15 @@ bool CScriptManager::UpdateSingleScripts(void* collection)
 		}
 	}
 
+	// Update JavaScript mods
+	UpdateJavaScriptMods();
+
+	// Dispatch key events to JavaScript mods
+	for (auto ev : keys)
+	{
+		if (ev.second) OnJSKeyDown(ev.first);
+		else OnJSKeyUp(ev.first);
+	}
 
 	if (!customScriptsInited && scriptCanBeStarted)
 	{
@@ -166,7 +178,7 @@ void CScriptManager::LoadCustomScripts()
 		{
 			if (hasEnding(filenameStr, ".dll") || hasEnding(filenameStr, ".asi"))
 			{
-				alt::Log::Debug << "Trying to load \"" << entry.path().generic_u8string() << "\"" << alt::Log::Endl;
+				spdlog::debug("Trying to load \"{}\"", entry.path().string());
 				HMODULE scriptLib = LoadLibraryW(entry.path().generic_wstring().c_str());
 				if (scriptLib) {
 					LibTickFunc libTick = (LibTickFunc)GetProcAddress(scriptLib, "Tick");
@@ -181,26 +193,84 @@ void CScriptManager::LoadCustomScripts()
 
 						if (libKeyDown)
 						{
-							alt::Log::Debug << "OnKeyDown event binded for " << filenameStr << alt::Log::Endl;
+							spdlog::debug("OnKeyDown event bound for {}", filenameStr);
 							ticker->BindKeyDown(libKeyDown);
 						}
 						if (libKeyUp)
 						{
 							ticker->BindKeyUp(libKeyUp);
-							alt::Log::Debug << "OnKeyUp event binded for " << filenameStr << alt::Log::Endl;
+							spdlog::debug("OnKeyUp event bound for {}", filenameStr);
 						}
 
-						alt::Log::Info << filenameStr << " successfully loaded" << alt::Log::Endl;
+						spdlog::info("{} successfully loaded", filenameStr);
 					}
 					else
-						alt::Log::Error << filenameStr << " load error. Init() and Tick() functions must be present in script DLL" << alt::Log::Endl;
+						spdlog::error("{} load error. Init() and Tick() functions must be present in script DLL", filenameStr);
 				}
-				else 
-					alt::Log::Error << filenameStr << " load error" << alt::Log::Endl;
+				else
+					spdlog::error("{} load error", filenameStr);
 			}
 		}
 	}
+
+	// Load JavaScript mods from mods/ directory
+	LoadJavaScriptMods();
+
 	needReceiveEvents = true;
+}
+
+void CScriptManager::LoadJavaScriptMods()
+{
+	spdlog::info("Initializing JavaScript runtime...");
+
+	// Initialize JavaScript runtime
+	auto& jsRuntime = rdr2js::GetJSRuntime();
+	if (!jsRuntime.Initialize(_GetNativeAddress, _GetGlobalPointer))
+	{
+		spdlog::error("Failed to initialize JavaScript runtime: {}", jsRuntime.GetLastError());
+		return;
+	}
+
+	// Initialize mod loader
+	auto& modLoader = rdr2js::GetModLoader();
+	if (!modLoader.Initialize(wClientPath, &jsRuntime))
+	{
+		spdlog::error("Failed to initialize mod loader");
+		return;
+	}
+
+	// Load all mods
+	int loadedCount = modLoader.LoadAllMods();
+	if (loadedCount > 0)
+	{
+		// Call init() on all mods
+		modLoader.CallAllInit();
+		jsModsLoaded = true;
+	}
+}
+
+void CScriptManager::UpdateJavaScriptMods()
+{
+	if (!jsModsLoaded) return;
+
+	auto& modLoader = rdr2js::GetModLoader();
+	modLoader.CallAllTick();
+}
+
+void CScriptManager::OnJSKeyDown(uint32_t key)
+{
+	if (!jsModsLoaded) return;
+
+	auto& modLoader = rdr2js::GetModLoader();
+	modLoader.CallAllKeyDown(key);
+}
+
+void CScriptManager::OnJSKeyUp(uint32_t key)
+{
+	if (!jsModsLoaded) return;
+
+	auto& modLoader = rdr2js::GetModLoader();
+	modLoader.CallAllKeyUp(key);
 }
 
 LRESULT CScriptManager::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -277,7 +347,7 @@ bool CScriptManager::RegisterThread(GtaThread* thread)
 
 	thread->Reset(context->scriptHash, nullptr, 0);
 
-	alt::Log::Debug("Created Thread with ID:", thread->GetId(), "ptr:", (void*)thread);
+	spdlog::debug("Created Thread with ID: {} ptr: {}", thread->GetId(), (void*)thread);
 
 	return true;
 }

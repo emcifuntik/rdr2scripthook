@@ -1,11 +1,6 @@
-cmake_minimum_required (VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
 project(launcher)
-set(PROJECT_NAME launcher)
-
-include(cotire)
-
-include_directories(${PROJECT_BINARY_DIR})
 
 file(GLOB_RECURSE PROJECT_SOURCE_FILES "src/*.h" "src/*.hpp" "src/*.cpp")
 file(GLOB_RECURSE SHARED_SOURCE_FILES "${RDRHOOK_SHARED}/*.h")
@@ -34,31 +29,35 @@ foreach(child ${children})
   source_group(Shared FILES ${RDRHOOK_SHARED}/${child})
 endforeach()
 
-include_directories(
-  ./src
-  ${RDRHOOK_SHARED}/log
-  ${RDRHOOK_SHARED}/utils
-)
-
-add_executable(
-  ${PROJECT_NAME}
+# Create executable
+add_executable(${PROJECT_NAME}
   ${PROJECT_SOURCE_FILES}
   ${SHARED_SOURCE_FILES}
 )
 
-add_definitions(
-  -DCXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}"
-  -DUNICODE
-  -D_UNICODE
+# Include directories
+target_include_directories(${PROJECT_NAME} PRIVATE
+  ${PROJECT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${RDRHOOK_SHARED}/log
+  ${RDRHOOK_SHARED}/utils
 )
 
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /Zi")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+# Compiler definitions
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+  CXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}"
+  UNICODE
+  _UNICODE
+  NOMINMAX
+  WIN32_LEAN_AND_MEAN
+  _MT
+  $<$<CONFIG:Debug>:_DEBUG>
+)
 
+# Target properties
 set_target_properties(${PROJECT_NAME} PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
   RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Debug"
   RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release"
-  COTIRE_CXX_PREFIX_HEADER_INIT "src/stdafx.h"
 )
-set(COTIRE_UNITY_OUTPUT_DIRECTORY "")

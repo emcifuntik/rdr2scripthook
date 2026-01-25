@@ -1,8 +1,6 @@
-cmake_minimum_required (VERSION 3.10)
+cmake_minimum_required(VERSION 3.21)
 
 project(simple-trainer)
-
-include(cotire)
 
 file(GLOB_RECURSE PROJECT_SOURCE_FILES "src/*.h" "src/*.hpp" "src/*.cpp" "src/*.c")
 file(GLOB_RECURSE SHARED_SOURCE_FILES
@@ -29,42 +27,48 @@ GroupSources(${PROJECT_SOURCE_DIR}/src "Source Files")
 GroupSources(${PROJECT_SOURCE_DIR}/resources "Resource Files")
 GroupSources(${RDRHOOK_SHARED}/src "Shared")
 
-include_directories(
-  ${PROJECT_BINARY_DIR}
-  ./
-  ./src
-
-  ${RDRHOOK_SHARED}/log
-)
-
+# ASI extension for plugin
 set(CMAKE_SHARED_LIBRARY_SUFFIX ".asi")
 
-add_library(
-  ${PROJECT_NAME} SHARED
+# Create library
+add_library(${PROJECT_NAME} SHARED
   ${PROJECT_SOURCE_FILES}
   ${SHARED_SOURCE_FILES}
 )
 
-add_definitions(
-  -DCXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}"
-  -DUNICODE
-  -D_UNICODE
-
-  -D_CRT_SECURE_NO_WARNINGS
+# Include directories
+target_include_directories(${PROJECT_NAME} PRIVATE
+  ${PROJECT_BINARY_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${RDRHOOK_SHARED}/log
 )
 
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /MT /Zi")
-set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /MTd")
+# Compiler definitions
+target_compile_definitions(${PROJECT_NAME} PRIVATE
+  CXX_COMPILER_ID="${CMAKE_CXX_COMPILER_ID}"
+  UNICODE
+  _UNICODE
+  _CRT_SECURE_NO_WARNINGS
+  NOMINMAX
+  WIN32_LEAN_AND_MEAN
+  _MT
+  $<$<CONFIG:Debug>:_DEBUG>
+)
 
-set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} /OPT:REF /OPT:ICF")
-
+# Target properties
 set_target_properties(${PROJECT_NAME} PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
+  CXX_STANDARD_REQUIRED ON
   RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Debug/scripts"
   RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/Release/scripts"
-  COTIRE_CXX_PREFIX_HEADER_INIT src/pch.h
+  LINK_FLAGS_RELEASE "/OPT:REF /OPT:ICF"
 )
 
-cotire(${PROJECT_NAME})
+# Precompiled headers (native CMake PCH)
+target_precompile_headers(${PROJECT_NAME} PRIVATE src/pch.h)
+
+# Depend on generate_natives target to ensure NativeNames.h is up-to-date
+add_dependencies(${PROJECT_NAME} generate_natives)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)

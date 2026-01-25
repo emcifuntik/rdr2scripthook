@@ -6,8 +6,6 @@
 
 #include "peds.h"
 
-ALT_LOG_IMPL;
-
 bool playerChanged = false;
 bool playerTeleported = false;
 
@@ -59,10 +57,10 @@ void DrawGameText(uint16_t x, uint16_t y, const char* text, uint8_t r, uint8_t g
 {
 	float fX = x / (float)1920;
 	float fY = y / (float)1080;
-	Native::Invoke<void, float, float>(N::SET_TEXT_SCALE, scaleX, scaleY);//0.342f
-	Native::Invoke<void, uint8_t, uint8_t, uint8_t, uint8_t>(0x50A41AD966910F03, r, g, b, a);
-	const char* varString = Native::Invoke<const char*, int, const char*, const char*>(N::_CREATE_VAR_STRING, 10, "LITERAL_STRING", text);
-	Native::Invoke<void, const char*, float, float>(0xD79334A4BB99BAD1, varString, fX, fY);
+	Native::Invoke<void, float, float>(N::_BG_SET_TEXT_SCALE, scaleX, scaleY);//0.342f
+	Native::Invoke<void, uint8_t, uint8_t, uint8_t, uint8_t>(N::_BG_SET_TEXT_COLOR, r, g, b, a);
+	const char* varString = Native::Invoke<const char*, int, const char*, const char*>(N::VAR_STRING, 10, "LITERAL_STRING", text);
+	Native::Invoke<void, const char*, float, float>(N::_BG_DISPLAY_TEXT, varString, fX, fY);
 }
 
 uint32_t myLastVehicle = 0;
@@ -113,7 +111,7 @@ void SpawnPed(const char* pedName)
 	uint32_t createdPed = Native::Invoke<uint32_t, uint32_t, float, float, float, float, bool, bool, bool, bool, bool, bool>(N::CREATE_PED, model, myPos.x + 1, myPos.y + 1, myPos.z, 0.f, false, false, false, false, true, true);
 	Native::Invoke<void, uint32_t, bool>(N::SET_ENTITY_VISIBLE, createdPed, true);
 	Native::Invoke<void, uint32_t, int, bool>(N::SET_ENTITY_ALPHA, createdPed, 255, false);
-	Native::Invoke<void, uint32_t, bool>(0x283978A15512B2FE, createdPed, true);
+	Native::Invoke<void, uint32_t, bool>(N::_SET_RANDOM_OUTFIT_VARIATION, createdPed, true);
 	Native::Invoke<void, uint32_t>(N::SET_MODEL_AS_NO_LONGER_NEEDED, model);
 }
 
@@ -132,7 +130,7 @@ void TeleportPlayer(float x, float y, float z)
 
 void SetWeather(const char* weather)
 {
-	Native::Invoke<void, uint32_t, uint32_t, float, bool>(N::_SET_WEATHER_TYPE_TRANSITION, String::Hash(weather), String::Hash(weather), 0.5f, true);
+	Native::Invoke<void, uint32_t, uint32_t, float, bool>(N::SET_CURR_WEATHER_STATE, String::Hash(weather), String::Hash(weather), 0.5f, true);
 }
 
 void AddToClockTime(int hours, int minutes, int seconds)
@@ -255,7 +253,6 @@ extern "C" {
 		GetGlobalPtr = getGlobal;
 
 		Native::SetEssentialFunction(getAddress);
-		Log::Info << "Natives registered" << Log::Endl;
 
 		bool* canChangeModel = (bool*)GetGlobalPtr(1835009);
 		*canChangeModel = true;
@@ -461,37 +458,37 @@ extern "C" {
 
 	DLL_EXPORT void OnKeyDown(uint32_t key)
 	{
-		if (key == 0x72)
+		if (key == VK_F3)
 		{
 			menuEnabled = !menuEnabled;
 		}
-		if (key == 0x26 && menuEnabled)
+		if (key == VK_UP && menuEnabled)
 		{
 			menuCursor--;
 			if (menuCursor < 0)
 				menuCursor = currentMenu->ChildCount() - (currentMenu->GetType() == eMenuType::SUB_MENU ? 0 : 1);
 		}
-		if (key == 0x28 && menuEnabled)
+		if (key == VK_DOWN && menuEnabled)
 		{
 			menuCursor++;
 			int maxItems = currentMenu->ChildCount() + (currentMenu->GetType() == eMenuType::SUB_MENU ? 1 : 0);
 			if (menuCursor >= maxItems)
 				menuCursor = 0;
 		}
-		if (key == 0x21 && menuEnabled)
+		if (key == VK_PRIOR && menuEnabled)
 		{
 			menuCursor -= 10;
 			if (menuCursor < 0)
 				menuCursor = currentMenu->ChildCount() - (currentMenu->GetType() == eMenuType::SUB_MENU ? 0 : 1);
 		}
-		if (key == 0x22 && menuEnabled)
+		if (key == VK_NEXT && menuEnabled)
 		{
 			menuCursor += 10;
 			int maxItems = currentMenu->ChildCount() + (currentMenu->GetType() == eMenuType::SUB_MENU ? 1 : 0);
 			if (menuCursor >= maxItems)
 				menuCursor = 0;
 		}
-		if (key == 0x0D && menuEnabled)
+		if (key == VK_RETURN && menuEnabled)
 		{
 			int cursorPos = menuCursor;
 			if (menuCursor == 0 && currentMenu->GetType() == eMenuType::SUB_MENU)
@@ -503,7 +500,7 @@ extern "C" {
 
 			if (currentMenu->GetType() == eMenuType::SUB_MENU)
 				cursorPos--;
-			
+
 			IMenu* childItem = currentMenu->GetChildItems()[cursorPos];
 			if (childItem->GetType() == eMenuType::MENU_ACTION)
 			{
@@ -518,7 +515,7 @@ extern "C" {
 				currentMenu = childItem;
 			}
 		}
-		if (key == 0x08 && menuEnabled)
+		if (key == VK_BACK && menuEnabled)
 		{
 			if (currentMenu->GetType() == eMenuType::SUB_MENU)
 			{
@@ -550,8 +547,7 @@ BOOL APIENTRY DllMain( HMODULE hModule,
 	{
 		std::wstring _moduleDir = GetModulePath(hModule);
 
-		std::wstring logPath = _moduleDir + L"/log.txt";
-		Log::Push(new Log::FileStream(logPath));
+		// std::wstring logPath = _moduleDir + L"/log.txt";
 		break;
 	}
     case DLL_THREAD_ATTACH:

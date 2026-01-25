@@ -15,7 +15,7 @@ void CSysAllocator::Dealloc(void* mem)
 }
 
 CMemory::Hook AllocHooks([] {
-	constexpr CMemory::Pattern allocPat("E8 ? ? ? ? 48 85 C0 74 ? 48 8B C8 E8 ? ? ? ? 48 8B C8 EB ? 48 8B CF 48 8B 05 ? ? ? ?");
+	constexpr CMemory::Pattern allocPat("E8 ? ? ? ? 48 85 C0 74 ? 48 83 20 ? 0F 57 C0 0F 11 40 ? 0F 11 40 ? 83 60");
 	constexpr CMemory::Pattern deallocPat("E8 ? ? ? ? 0F B6 43 ? 48 8D 7F ?");
 
 	_alloc = allocPat.Search().GetCall<decltype(_alloc)>();

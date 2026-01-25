@@ -1,0 +1,27 @@
+diff --git a/include/JavaScriptCore/StackFrame.h b/include/JavaScriptCore/StackFrame.h
+--- a/include/JavaScriptCore/StackFrame.h
++++ b/include/JavaScriptCore/StackFrame.h
+@@ -98,12 +98,6 @@ public:
+         return false;
+     }
+
+-    bool isAsyncFrameWithoutCodeBlock() const
+-    {
+-        return isAsyncFrame() && !codeBlock();
+-    }
+-
+ #if USE(BUN_JSC_ADDITIONS)
+     bool isAsyncFrame() const
+     {
+@@ -111,6 +105,11 @@ public:
+             return jsFrame->m_isAsyncFrame;
+         return false;
+     }
++
++    bool isAsyncFrameWithoutCodeBlock() const
++    {
++        return isAsyncFrame() && !codeBlock();
++    }
+ #endif
+
+     LineColumn computeLineAndColumn() const;

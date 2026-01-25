@@ -28,7 +28,6 @@ public:
 
 	}
 
-	// Унаследовано через IMenu
 	virtual const std::vector<IMenu*>& GetChildItems() override;
 	virtual eMenuType GetType() override;
 	virtual IMenu* GetParent() override;
@@ -40,7 +39,6 @@ private:
 	std::vector<IMenu*> childItems;
 	std::string title;
 
-	// Унаследовано через IMenu
 	virtual size_t ChildCount() override;
 };
 
@@ -52,7 +50,6 @@ public:
 
 	}
 
-	// Унаследовано через IMenu
 	virtual const std::vector<IMenu*>& GetChildItems() override;
 	virtual eMenuType GetType() override;
 	virtual IMenu* GetParent() override;
@@ -65,7 +62,6 @@ private:
 	std::string title;
 	IMenu* parent;
 
-	// Унаследовано через IMenu
 	virtual size_t ChildCount() override;
 };
 
@@ -77,7 +73,6 @@ public:
 
 	}
 
-	// Унаследовано через IMenu
 	virtual const std::vector<IMenu*>& GetChildItems() override;
 	virtual eMenuType GetType() override;
 	virtual IMenu* GetParent() override;
@@ -89,6 +84,5 @@ private:
 	std::string title;
 	std::function<void(void)> actionFunc;
 
-	// Унаследовано через IMenu
 	virtual size_t ChildCount() override;
 };

@@ -1,3 +1,6 @@
-[submodule "cmake/cotire"]
-	path = cmake/cotire
-	url = https://github.com/sakra/cotire.git
+[submodule "vcpkg"]
+	path = vcpkg
+	url = https://github.com/microsoft/vcpkg.git
+[submodule "nativedb"]
+	path = nativedb
+	url = git@github.com:alloc8or/rdr3-nativedb-data.git

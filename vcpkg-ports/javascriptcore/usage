@@ -1,0 +1,24 @@
+The package javascriptcore provides CMake targets:
+
+    find_package(JavaScriptCore CONFIG REQUIRED)
+    target_link_libraries(main PRIVATE
+        JavaScriptCore::JavaScriptCore
+        JavaScriptCore::WTF
+        JavaScriptCore::bmalloc
+        JavaScriptCore::jsc
+        JavaScriptCore::icu-dt
+        JavaScriptCore::icu-in
+        JavaScriptCore::icu-uc
+    )
+
+Available targets:
+  - JavaScriptCore::JavaScriptCore - Main JavaScriptCore engine
+  - JavaScriptCore::WTF - WebKit Template Framework utilities
+  - JavaScriptCore::bmalloc - bmalloc memory allocator
+  - JavaScriptCore::jsc - JSC shell executable library
+  - JavaScriptCore::icu-dt - ICU data library
+  - JavaScriptCore::icu-in - ICU internationalization library
+  - JavaScriptCore::icu-uc - ICU Unicode library
+
+For basic usage, typically you only need:
+    target_link_libraries(main PRIVATE JavaScriptCore::JavaScriptCore)

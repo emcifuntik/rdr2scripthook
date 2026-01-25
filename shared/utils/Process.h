@@ -2,6 +2,7 @@
 #ifdef _WIN32
 #include <Windows.h>
 #include <cstdint>
+#include <string>
 #include <TlHelp32.h>
 
 namespace Process {

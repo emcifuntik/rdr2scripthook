@@ -1,0 +1,9 @@
+# Example JavaScript Mod for RDR2 Script Hook
+# This demonstrates the basic mod structure and API usage
+
+[mod]
+name = "Example JavaScript Mod"
+version = "1.0.0"
+author = "RDR2 Script Hook"
+description = "A simple example mod demonstrating the JavaScript API"
+entrypoint = "main.js"

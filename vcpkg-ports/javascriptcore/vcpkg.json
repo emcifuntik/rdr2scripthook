@@ -1,0 +1,8 @@
+{
+  "name": "javascriptcore",
+  "version-string": "autobuild-f151e5c43c3546da23c5c1e709452da25d47e168",
+  "description": "Bun's WebKit fork - JavaScriptCore engine with WTF, bmalloc, and ICU libraries (prebuilt binaries for Windows x64)",
+  "homepage": "https://github.com/oven-sh/webkit",
+  "license": "BSD-2-Clause AND LGPL-2.1-or-later",
+  "supports": "windows & x64"
+}

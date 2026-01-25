@@ -1,13 +1,12 @@
 ﻿#include "stdafx.h"
 #include "CMemory.h"
 #include <chrono>
+#include <filesystem>
 #include <fstream>
 #include <thread>
 #include <unordered_map>
-#include "alt-log.h"
+#include "Logger.h"
 #include "scripting/CScriptManager.h"
-
-using namespace alt;
 
 std::wstring _moduleDir;
 static std::wstring GetModulePath(HMODULE module)
@@ -41,7 +40,7 @@ void Init()
 {
 	CMemory::RunHooks();
 	CScriptManager::Instance().Init();
-	Log::Info << "Inited" << Log::Endl;
+	spdlog::info("RDR2 Scripthook fully initialized");
 }
 
 LPSTR (*GetCommandLineA_Orig)() = nullptr;
@@ -65,8 +64,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		CScriptManager::Instance().SetClientPath(_moduleDir);
 		CMemory::Base() = (uintptr_t)GetModuleHandle(NULL);
 
-		std::wstring logPath = _moduleDir + L"/log.txt";
-		Log::Push(new Log::FileStream(logPath));
+		// Initialize logger to write to launcher folder
+		std::filesystem::path logPath = std::filesystem::path(_moduleDir) / "log.txt";
+		rdr2::Logger::Initialize(logPath);
 
 		std::wstring crossMapPath = _moduleDir + L"/crossmap.dat";
 		std::ifstream crossIn(crossMapPath, std::ifstream::binary);
@@ -83,7 +83,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 			}
 		}
 
-		Log::Info << "RDR2 Scripthook initialized" << Log::Endl;
+		spdlog::info("RDR2 Scripthook initialized");
 
 		MH_Initialize();
 		CMemory(GetCommandLineA).Detour(GetCommandLineA_Hook, &GetCommandLineA_Orig);
@@ -94,7 +94,8 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		break;
     case DLL_PROCESS_DETACH:
 		MH_Uninitialize();
-		Log::Info << "RDR2 Scripthook deinitialized" << Log::Endl;
+		spdlog::info("RDR2 Scripthook deinitialized");
+		rdr2::Logger::Shutdown();
         break;
     }
     return TRUE;
