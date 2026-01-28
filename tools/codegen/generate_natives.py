@@ -645,6 +645,304 @@ def generate_native_names_header(natives_data: dict) -> str:
 
     return '\n'.join(lines)
 
+def map_type_to_ts(native_type: str) -> str:
+    """Map native types to TypeScript types."""
+    type_map = {
+        'int': 'number',
+        'float': 'number',
+        'BOOL': 'boolean',
+        'Hash': 'number',
+        'const char*': 'string',
+        'char*': 'string',
+        'void': 'void',
+        'Vector3': 'Vector3',
+        'Vector3*': 'Vector3',
+        'Any': 'any',
+        'Any*': 'any',
+        'Entity': 'number',
+        'Ped': 'number',
+        'Vehicle': 'number',
+        'Object': 'number',
+        'Cam': 'number',
+        'Player': 'number',
+        'Blip': 'number',
+        'Pickup': 'number',
+        'Interior': 'number',
+        'FireId': 'number',
+        'ScrHandle': 'number',
+        'ItemSet': 'number',
+        'Volume': 'number',
+        'AnimScene': 'number',
+        'PersChar': 'number',
+        'PopZone': 'number',
+        'Prompt': 'number',
+        'PropSet': 'number',
+    }
+
+    # Handle pointer types
+    if native_type.endswith('*') and native_type not in type_map:
+        base_type = native_type[:-1].strip()
+        return type_map.get(base_type, 'number')
+
+    if native_type in type_map:
+        return type_map[native_type]
+
+    return 'number'  # Default for handles
+
+
+def generate_natives_dts(natives_data: dict) -> str:
+    """Generate TypeScript declaration file for natives module."""
+    lines = [
+        '// Auto-generated TypeScript declarations for natives module',
+        '// Do not edit manually - regenerate with tools/codegen/generate_natives.py',
+        '',
+        'declare module "natives" {',
+        '    /** Vector3 type returned by some natives */',
+        '    interface Vector3 {',
+        '        x: number;',
+        '        y: number;',
+        '        z: number;',
+        '    }',
+        '',
+        '    /** Native string handle returned by varString and similar natives */',
+        '    interface NativeString {',
+        '        /** Raw pointer to game memory - use when passing to other natives */',
+        '        readonly __nativePtr__: number;',
+        '        /** String value for display */',
+        '        readonly value: string;',
+        '        toString(): string;',
+        '    }',
+        '',
+    ]
+
+    # Track generated names to avoid duplicates
+    generated_names = set()
+
+    for namespace, natives in sorted(natives_data.items()):
+        lines.append(f'    // {namespace}')
+
+        for hash_str, native in sorted(natives.items(), key=lambda x: x[1].get('name', '')):
+            name = native.get('name', '')
+            if not name:
+                continue
+
+            camel_name = upper_to_camel_case(name)
+
+            # Skip invalid identifiers (names starting with numbers/hash values)
+            if not camel_name or camel_name[0].isdigit():
+                continue
+
+            # Skip duplicates
+            if camel_name in generated_names:
+                continue
+            generated_names.add(camel_name)
+
+            # Build parameter list
+            params = native.get('params', [])
+            param_strs = []
+            is_variadic = native.get('variadic', False)
+            for idx, param in enumerate(params):
+                param_name = param.get('name', 'p')
+                param_type = param.get('type', 'any')
+
+                # Handle variadic parameters
+                if param_name == '...' or (not param_type and is_variadic):
+                    param_strs.append('...args: any[]')
+                    continue
+
+                ts_type = map_type_to_ts(param_type) if param_type else 'any'
+                # Sanitize param name (some have reserved words or invalid names)
+                if param_name in ['in', 'out', 'function', 'class', 'default', 'switch', 'case', 'return', 'new', 'this']:
+                    param_name = param_name + '_'
+                if not param_name or param_name.startswith('.'):
+                    param_name = f'p{idx}'
+                param_strs.append(f'{param_name}: {ts_type}')
+
+            # Get return type
+            return_type = native.get('return_type', 'void')
+            ts_return = map_type_to_ts(return_type)
+            # String returns are now NativeString objects
+            if return_type in ['const char*', 'char*']:
+                ts_return = 'NativeString'
+
+            # Add JSDoc comment if available
+            comment = native.get('comment', '')
+            if comment:
+                comment = comment.replace('*/', '').replace('/*', '').strip()
+                if comment:
+                    # Escape any problematic characters
+                    comment = comment.replace('\n', ' ')
+                    if len(comment) > 200:
+                        comment = comment[:197] + '...'
+                    lines.append(f'    /** {comment} */')
+
+            lines.append(f'    export function {camel_name}({", ".join(param_strs)}): {ts_return};')
+
+        lines.append('')
+
+    lines.append('    const _default: {')
+    lines.append('        [key: string]: (...args: any[]) => any;')
+    lines.append('    };')
+    lines.append('    export default _default;')
+    lines.append('}')
+    lines.append('')
+
+    return '\n'.join(lines)
+
+
+def generate_core_dts() -> str:
+    """Generate TypeScript declaration file for core module."""
+    return '''// Auto-generated TypeScript declarations for core module
+// Do not edit manually - regenerate with tools/codegen/generate_natives.py
+
+declare module "core" {
+    /** Callback function type for tick callbacks */
+    type TickCallback = () => void;
+
+    /** Callback function type for key callbacks */
+    type KeyCallback = (key: number) => void;
+
+    /**
+     * Register a callback to be called every game tick
+     * @param callback Function to call every tick
+     */
+    export function addTickCallback(callback: TickCallback): void;
+
+    /**
+     * Register a callback to be called when a key is pressed
+     * @param callback Function to call with the virtual key code
+     */
+    export function addKeyDownCallback(callback: KeyCallback): void;
+
+    /**
+     * Register a callback to be called when a key is released
+     * @param callback Function to call with the virtual key code
+     */
+    export function addKeyUpCallback(callback: KeyCallback): void;
+}
+'''
+
+
+def generate_globals_dts() -> str:
+    """Generate TypeScript declaration file for global types and constants."""
+    # Virtual key codes
+    vk_codes = [
+        ('VK_BACK', 0x08, 'Backspace'),
+        ('VK_TAB', 0x09, 'Tab'),
+        ('VK_RETURN', 0x0D, 'Enter'),
+        ('VK_SHIFT', 0x10, 'Shift'),
+        ('VK_CONTROL', 0x11, 'Ctrl'),
+        ('VK_MENU', 0x12, 'Alt'),
+        ('VK_PAUSE', 0x13, 'Pause'),
+        ('VK_CAPITAL', 0x14, 'Caps Lock'),
+        ('VK_ESCAPE', 0x1B, 'Escape'),
+        ('VK_SPACE', 0x20, 'Space'),
+        ('VK_PRIOR', 0x21, 'Page Up'),
+        ('VK_NEXT', 0x22, 'Page Down'),
+        ('VK_END', 0x23, 'End'),
+        ('VK_HOME', 0x24, 'Home'),
+        ('VK_LEFT', 0x25, 'Left Arrow'),
+        ('VK_UP', 0x26, 'Up Arrow'),
+        ('VK_RIGHT', 0x27, 'Right Arrow'),
+        ('VK_DOWN', 0x28, 'Down Arrow'),
+        ('VK_INSERT', 0x2D, 'Insert'),
+        ('VK_DELETE', 0x2E, 'Delete'),
+        ('VK_F1', 0x70, 'F1'),
+        ('VK_F2', 0x71, 'F2'),
+        ('VK_F3', 0x72, 'F3'),
+        ('VK_F4', 0x73, 'F4'),
+        ('VK_F5', 0x74, 'F5'),
+        ('VK_F6', 0x75, 'F6'),
+        ('VK_F7', 0x76, 'F7'),
+        ('VK_F8', 0x77, 'F8'),
+        ('VK_F9', 0x78, 'F9'),
+        ('VK_F10', 0x79, 'F10'),
+        ('VK_F11', 0x7A, 'F11'),
+        ('VK_F12', 0x7B, 'F12'),
+        ('VK_NUMPAD0', 0x60, 'Numpad 0'),
+        ('VK_NUMPAD1', 0x61, 'Numpad 1'),
+        ('VK_NUMPAD2', 0x62, 'Numpad 2'),
+        ('VK_NUMPAD3', 0x63, 'Numpad 3'),
+        ('VK_NUMPAD4', 0x64, 'Numpad 4'),
+        ('VK_NUMPAD5', 0x65, 'Numpad 5'),
+        ('VK_NUMPAD6', 0x66, 'Numpad 6'),
+        ('VK_NUMPAD7', 0x67, 'Numpad 7'),
+        ('VK_NUMPAD8', 0x68, 'Numpad 8'),
+        ('VK_NUMPAD9', 0x69, 'Numpad 9'),
+        ('VK_MULTIPLY', 0x6A, 'Numpad *'),
+        ('VK_ADD', 0x6B, 'Numpad +'),
+        ('VK_SUBTRACT', 0x6D, 'Numpad -'),
+        ('VK_DECIMAL', 0x6E, 'Numpad .'),
+        ('VK_DIVIDE', 0x6F, 'Numpad /'),
+    ]
+
+    lines = [
+        '// Auto-generated TypeScript declarations for global types',
+        '// Do not edit manually - regenerate with tools/codegen/generate_natives.py',
+        '',
+        '/** Hash utility for converting strings to game hashes */',
+        'declare const Hash: {',
+        '    /**',
+        '     * Convert a string to a joaat hash (Jenkins one-at-a-time)',
+        '     * @param str String to hash',
+        '     * @returns Hash value as number',
+        '     */',
+        '    joaat(str: string): number;',
+        '};',
+        '',
+        '/** Global script variables access */',
+        'declare const Global: {',
+        '    /**',
+        '     * Get an integer from a global variable',
+        '     * @param index Global variable index',
+        '     * @returns The integer value',
+        '     */',
+        '    getInt(index: number): number;',
+        '',
+        '    /**',
+        '     * Set an integer in a global variable',
+        '     * @param index Global variable index',
+        '     * @param value Value to set',
+        '     */',
+        '    setInt(index: number, value: number): void;',
+        '',
+        '    /**',
+        '     * Get a float from a global variable',
+        '     * @param index Global variable index',
+        '     * @returns The float value',
+        '     */',
+        '    getFloat(index: number): number;',
+        '',
+        '    /**',
+        '     * Set a float in a global variable',
+        '     * @param index Global variable index',
+        '     * @param value Value to set',
+        '     */',
+        '    setFloat(index: number, value: number): void;',
+        '};',
+        '',
+        '// Virtual Key Codes',
+    ]
+
+    for name, value, comment in vk_codes:
+        lines.append(f'/** {comment} key */')
+        lines.append(f'declare const {name}: {value};')
+
+    lines.append('')
+    lines.append('// Letter keys (A-Z are 0x41-0x5A)')
+    for i, letter in enumerate('ABCDEFGHIJKLMNOPQRSTUVWXYZ'):
+        lines.append(f'declare const VK_{letter}: {0x41 + i};')
+
+    lines.append('')
+    lines.append('// Number keys (0-9 are 0x30-0x39)')
+    for i in range(10):
+        lines.append(f'declare const VK_{i}: {0x30 + i};')
+
+    lines.append('')
+
+    return '\n'.join(lines)
+
+
 def main():
     # Find the project root
     script_dir = Path(__file__).parent
@@ -692,6 +990,37 @@ def main():
     with open(natives_cpp_path, 'w', encoding='utf-8') as f:
         f.write(natives_cpp)
     print(f'Written to {natives_cpp_path}')
+
+    # Create types output directory
+    types_output_dir = project_root / 'shared' / 'types'
+    types_output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate TypeScript declarations for natives module
+    print('Generating natives.d.ts...')
+    natives_dts = generate_natives_dts(natives_data)
+
+    natives_dts_path = types_output_dir / 'natives.d.ts'
+    with open(natives_dts_path, 'w', encoding='utf-8') as f:
+        f.write(natives_dts)
+    print(f'Written to {natives_dts_path}')
+
+    # Generate TypeScript declarations for core module
+    print('Generating core.d.ts...')
+    core_dts = generate_core_dts()
+
+    core_dts_path = types_output_dir / 'core.d.ts'
+    with open(core_dts_path, 'w', encoding='utf-8') as f:
+        f.write(core_dts)
+    print(f'Written to {core_dts_path}')
+
+    # Generate TypeScript declarations for globals
+    print('Generating globals.d.ts...')
+    globals_dts = generate_globals_dts()
+
+    globals_dts_path = types_output_dir / 'globals.d.ts'
+    with open(globals_dts_path, 'w', encoding='utf-8') as f:
+        f.write(globals_dts)
+    print(f'Written to {globals_dts_path}')
 
     print('Done!')
 
