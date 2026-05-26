@@ -49,29 +49,20 @@ target_include_directories(${PROJECT_NAME} PRIVATE
   ${RDRHOOK_SHARED}/utils
 )
 
-# Find vcpkg packages
-find_package(JavaScriptCore CONFIG REQUIRED)
+# Find vcpkg packages. JSC and ICU come transitively via ejsc::ejsc; system
+# libs (ws2_32, etc.) likewise. Avoid `find_package(JavaScriptCore)` here
+# because JavaScriptCoreConfig.cmake's add_library() calls aren't guarded
+# against re-entry, and ejsc's config already pulls them in.
+find_package(ejsc CONFIG REQUIRED)
 find_package(toml11 CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 
-# Link libraries from vcpkg
 target_link_libraries(${PROJECT_NAME} PRIVATE
   minhook::minhook
-  JavaScriptCore::JavaScriptCore
-  JavaScriptCore::WTF
-  JavaScriptCore::bmalloc
-  JavaScriptCore::icu-dt
-  JavaScriptCore::icu-in
-  JavaScriptCore::icu-uc
+  ejsc::ejsc
+  ejsc::extra
   toml11::toml11
   spdlog::spdlog
-  # System libraries required by JavaScriptCore
-  ws2_32
-  winmm
-  dbghelp
-  Synchronization
-
-  clang_rt.builtins-x86_64.lib
 )
 
 # Compiler definitions

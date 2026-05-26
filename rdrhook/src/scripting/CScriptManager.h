@@ -12,7 +12,6 @@
 
 // Forward declarations for JavaScript support
 namespace rdr2js {
-    class JSRuntime;
     class ModLoader;
 }
 

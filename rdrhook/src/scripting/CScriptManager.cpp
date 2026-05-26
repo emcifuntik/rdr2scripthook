@@ -1,6 +1,6 @@
 #include "stdafx.h"
 #include "CScriptManager.h"
-#include "js/JSRuntime.h"
+#include "js/Mod.h"
 #include "js/ModLoader.h"
 #include "Logger.h"
 
@@ -223,28 +223,22 @@ void CScriptManager::LoadJavaScriptMods()
 {
 	spdlog::info("Initializing JavaScript runtime...");
 
-	// Initialize JavaScript runtime
-	auto& jsRuntime = rdr2js::GetJSRuntime();
-	if (!jsRuntime.Initialize(_GetNativeAddress, _GetGlobalPointer))
-	{
-		spdlog::error("Failed to initialize JavaScript runtime: {}", jsRuntime.GetLastError());
-		return;
-	}
+	// Wire the game-side resolvers used by Native.invoke / Global.* etc.
+	rdr2js::InstallGameBridge(_GetNativeAddress, _GetGlobalPointer);
 
-	// Initialize mod loader
+	// Force the Runtime singleton to spin up (also runs one-time JSC init).
+	(void)rdr2js::GetRuntime();
+
 	auto& modLoader = rdr2js::GetModLoader();
-	if (!modLoader.Initialize(wClientPath, &jsRuntime))
+	if (!modLoader.Initialize(wClientPath))
 	{
 		spdlog::error("Failed to initialize mod loader");
 		return;
 	}
 
-	// Load all mods
 	int loadedCount = modLoader.LoadAllMods();
 	if (loadedCount > 0)
 	{
-		// Call init() on all mods
-		modLoader.CallAllInit();
 		jsModsLoaded = true;
 	}
 }
@@ -252,25 +246,19 @@ void CScriptManager::LoadJavaScriptMods()
 void CScriptManager::UpdateJavaScriptMods()
 {
 	if (!jsModsLoaded) return;
-
-	auto& modLoader = rdr2js::GetModLoader();
-	modLoader.CallAllTick();
+	rdr2js::GetModLoader().TickAll();
 }
 
 void CScriptManager::OnJSKeyDown(uint32_t key)
 {
 	if (!jsModsLoaded) return;
-
-	auto& modLoader = rdr2js::GetModLoader();
-	modLoader.CallAllKeyDown(key);
+	rdr2js::GetModLoader().OnKeyDownAll(key);
 }
 
 void CScriptManager::OnJSKeyUp(uint32_t key)
 {
 	if (!jsModsLoaded) return;
-
-	auto& modLoader = rdr2js::GetModLoader();
-	modLoader.CallAllKeyUp(key);
+	rdr2js::GetModLoader().OnKeyUpAll(key);
 }
 
 LRESULT CScriptManager::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
