@@ -5,6 +5,7 @@
   "dependencies": [
     "minhook",
     "javascriptcore",
+    "embeddedjsc",
     "toml11",
     "spdlog"
   ]
