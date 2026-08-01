@@ -34,17 +34,16 @@ find_package(minhook CONFIG REQUIRED)
 # Find Python for code generation
 find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
-# Custom target to generate natives.js from nativedb
+# Keep the Rust WASM SDK bindings in sync with nativedb.
 add_custom_target(generate_natives
     COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_SOURCE_DIR}/tools/codegen/generate_natives.py"
     WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    COMMENT "Generating natives.js, natives_hashes.js, and NativeNames.h from nativedb..."
+    COMMENT "Generating Rust native bindings from nativedb..."
     SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/codegen/generate_natives.py"
         "${CMAKE_CURRENT_SOURCE_DIR}/nativedb/natives.json"
     BYPRODUCTS
-        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/trainer/src/core/NativeNames.h"
-        "${CMAKE_CURRENT_SOURCE_DIR}/rdrhook/src/js/JSNativesGenerated.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rdr2-wasm/src/natives.rs"
 )
 
 # Target selection
@@ -54,13 +53,11 @@ if(TARGET_PROJECT STREQUAL "all")
     set(rdrhook ON)
     set(launcher ON)
     set(launcher-hook ON)
-    set(trainer ON)
-    set(jsctest ON)
+    set(wasmtest ON)
     add_subdirectory(rdrhook rdrhook)
     add_subdirectory(launcher launcher)
     add_subdirectory(launcher-hook launcher-hook)
-    add_subdirectory(scripts/trainer scripts/trainer)
-    add_subdirectory(jsctest jsctest)
+    add_subdirectory(wasmtest wasmtest)
 else()
     set(${TARGET_PROJECT} ON)
     add_subdirectory(${TARGET_PROJECT} ${TARGET_PROJECT})

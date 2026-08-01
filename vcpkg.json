@@ -4,9 +4,8 @@
   "version": "1.0.0",
   "dependencies": [
     "minhook",
-    "javascriptcore",
-    "embeddedjsc",
     "toml11",
-    "spdlog"
+    "spdlog",
+    "wasmtime"
   ]
 }

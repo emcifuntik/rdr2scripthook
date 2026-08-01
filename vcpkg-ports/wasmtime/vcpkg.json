@@ -1,0 +1,8 @@
+{
+  "name": "wasmtime",
+  "version": "47.0.3",
+  "description": "A fast and secure runtime for WebAssembly",
+  "homepage": "https://wasmtime.dev/",
+  "license": "Apache-2.0 WITH LLVM-exception",
+  "supports": "windows & x64"
+}

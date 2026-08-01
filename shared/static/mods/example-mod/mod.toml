@@ -1,9 +1,8 @@
-# Example JavaScript Mod for RDR2 Script Hook
-# This demonstrates the basic mod structure and API usage
+# Example Rust WebAssembly mod for RDR2 Script Hook.
 
 [mod]
-name = "Example JavaScript Mod"
+name = "Example Rust WASM Mod"
 version = "1.0.0"
 author = "RDR2 Script Hook"
-description = "A simple example mod demonstrating the JavaScript API"
-entrypoint = "main.js"
+description = "A simple example mod demonstrating the Rust WebAssembly API"
+entrypoint = "main.wasm"

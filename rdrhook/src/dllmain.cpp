@@ -93,6 +93,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
     case DLL_THREAD_DETACH:
 		break;
     case DLL_PROCESS_DETACH:
+		CScriptManager::Instance().ShutdownWasmMods();
 		MH_Uninitialize();
 		spdlog::info("RDR2 Scripthook deinitialized");
 		rdr2::Logger::Shutdown();

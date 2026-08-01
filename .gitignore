@@ -1,3 +1,5 @@
 BUILD
 BIN
 LIB
+scripts/example-wasm/target/
+scripts/rdr2-wasm/target/

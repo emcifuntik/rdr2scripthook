@@ -1,7 +1,8 @@
 #include "stdafx.h"
 #include "CScriptManager.h"
-#include "js/Mod.h"
-#include "js/ModLoader.h"
+#include "wasm/Bindings.h"
+#include "wasm/ModLoader.h"
+#include "wasm/Runtime.h"
 #include "Logger.h"
 
 bool(*UpdateSingleScripts_orig)(void*) = nullptr;
@@ -33,28 +34,14 @@ void CScriptManager::HookWinApi()
 	pWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)_WndProc);
 }
 
-rage::scrThread * CScriptManager::GetActiveThread()
-{
-	return *currentScriptThread;
-}
-
-void CScriptManager::SetActiveThread(rage::scrThread * thread)
-{
-	*currentScriptThread = thread;
-}
-
 void CScriptManager::Init()
 {
-	constexpr CMemory::Pattern scriptHandlerMgrPat("48 8D 0D ? ? ? ? E8 ? ? ? ? 84 C0 75 ? 8B 8B ? ? ? ?");
-	constexpr CMemory::Pattern currentScriptThreadPat("48 39 1D ? ? ? ? 75 ? 48 8D 05 ? ? ? ?");
 	constexpr CMemory::Pattern isInSessionPat("80 3D ? ? ? ? ? 74 ? 48 8B 0D ? ? ? ? E8 ? ? ? ? 0F B6 40 ?");
 	constexpr CMemory::Pattern getNativeAddressPat("48 8B 15 ? ? ? ? 4C 8B C9 49 F7 D1");
 	constexpr CMemory::Pattern updateSingleScriptsPat("48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC ? 45 33 F6 BD ? ? ? ?");
 	constexpr CMemory::Pattern shutdownLoadingScreenPat("8A 05 ? ? ? ? 84 C0 75 ? C6 05 ? ? ? ? ?");
 	constexpr CMemory::Pattern globalsPtrPat("4C 8D 05 ? ? ? ? 4D 8B 08 4D 85 C9 74 ? 4D 3B D9");
 
-	g_scriptHandlerMgr = scriptHandlerMgrPat.Search().GetOffset().Get<rage::scriptHandlerMgr*>();
-	currentScriptThread = currentScriptThreadPat.Search().GetOffset(3).Get<rage::scrThread * *>();
 	isInSession = isInSessionPat.Search().GetOffset(2).Get<bool*>();
 	GetNativeAddress_orig = getNativeAddressPat.Search().Get<decltype(GetNativeAddress_orig)>();
 	updateSingleScriptsPat.Search().Detour(UpdateSingleScripts_Hook, &UpdateSingleScripts_orig);
@@ -64,34 +51,16 @@ void CScriptManager::Init()
 
 void CScriptManager::AddCrossMapEntry(uint64_t oldHash, uint64_t newHash)
 {
-	if (!crossMap.count(oldHash)) {}
-		crossMap.insert(std::pair<uint64_t, uint64_t>(oldHash, newHash));
+	crossMap.try_emplace(oldHash, newHash);
 }
 
 uintptr_t CScriptManager::GetNativeAddress(uint64_t hash)
 {
-	uint64_t _hash = hash;
-	uintptr_t address = 0;
-	if (crossMap.count(_hash))
-		_hash = crossMap[_hash];
-
-	return GetNativeAddress_orig(_hash);
+	const auto mapped = crossMap.find(hash);
+	return GetNativeAddress_orig(mapped != crossMap.end() ? mapped->second : hash);
 }
 
-bool CScriptManager::UpdateGtaScript(GtaThread* thread, int ticksCount)
-{
-	bool result = false;
-	if (thread->context.threadId)
-	{
-		if (thread->Update(ticksCount) != rage::eThreadState::ThreadStateKilled)
-			result = true;
-	}
-	return result;
-}
-
-bool customScriptsInited = false;
-
-bool CScriptManager::UpdateSingleScripts(void* collection)
+bool CScriptManager::UpdateSingleScripts(void*)
 {
 	if (*CScriptManager::isInSession)
 	{
@@ -99,63 +68,33 @@ bool CScriptManager::UpdateSingleScripts(void* collection)
 		return false;
 	}
 
-	bool result = false;
-
 	std::vector<std::pair<uint32_t, bool>> keys;
 	uint32_t key = 0;
 	bool down = false;
 
 	while (PopKeyEvent(key, down)) keys.push_back(std::pair(key, down));
 
-	for (size_t i = 0; i < ourThreads.size(); ++i)
-	{
-		GtaThread* thread = ourThreads[i];
-		if (UpdateGtaScript(thread, 13000000))
-			result = true;
+	// Update WebAssembly mods.
+	rdr2wasm::bindings::PollKeyboard();
+	UpdateWasmMods();
 
-		TickerScript* script = (TickerScript*)thread;
-		auto state = script->Push();
-		for (auto ev : keys)
-		{
-			if (ev.second) script->KeyDown(ev.first);
-			else script->KeyUp(ev.first);
-		}
-	}
-
-	// Update JavaScript mods
-	UpdateJavaScriptMods();
-
-	// Dispatch key events to JavaScript mods
+	// Dispatch key events to WebAssembly mods.
 	for (auto ev : keys)
 	{
-		if (ev.second) OnJSKeyDown(ev.first);
-		else OnJSKeyUp(ev.first);
+		if (ev.second) OnWasmKeyDown(ev.first);
+		else OnWasmKeyUp(ev.first);
 	}
 
-	if (!customScriptsInited && scriptCanBeStarted)
+	if (!wasmModsInitialized && scriptCanBeStarted)
 	{
 		HookWinApi();
-		LoadCustomScripts();
-		customScriptsInited = true;
+		LoadWasmMods();
+		needReceiveEvents = true;
+		wasmModsInitialized = true;
 	}
 
-	return result;
+	return false;
 }
-
-//https://stackoverflow.com/questions/874134/find-out-if-string-ends-with-another-string-in-c
-bool hasEnding(std::string const& fullString, std::string const& ending) {
-	if (fullString.length() >= ending.length())
-		return (0 == fullString.compare(fullString.length() - ending.length(), ending.length(), ending));
-	else
-		return false;
-}
-
-typedef uintptr_t(*GetNativeAddressFunc)(uint64_t hash);
-typedef void*(*GetGlobalPointerFunc)(uint32_t globalVarId);
-typedef void(*LibInitFunc)(GetNativeAddressFunc, GetGlobalPointerFunc);
-typedef void(*LibTickFunc)();
-typedef void(*LibKeyDown)(uint32_t);
-typedef void(*LibKeyUp)(uint32_t);
 
 uintptr_t _GetNativeAddress(uint64_t hash)
 {
@@ -167,69 +106,21 @@ void* _GetGlobalPointer(uint32_t globalVarId)
 	return CScriptManager::Instance().GetGlobalPointer(globalVarId);
 }
 
-void CScriptManager::LoadCustomScripts()
+void CScriptManager::LoadWasmMods()
 {
-	const fs::path pathToShow{ wClientPath + L"/scripts" };
+	spdlog::info("Initializing Wasmtime runtime...");
 
-	for (const auto& entry : fs::directory_iterator(pathToShow))
+	// Wire the game-side resolvers used by the WASM host imports.
+	rdr2wasm::InstallGameBridge(_GetNativeAddress, _GetGlobalPointer);
+
+	auto& runtime = rdr2wasm::GetRuntime();
+	if (!runtime.IsValid())
 	{
-		const auto filenameStr = entry.path().filename().string();
-		if (entry.is_regular_file())
-		{
-			if (hasEnding(filenameStr, ".dll") || hasEnding(filenameStr, ".asi"))
-			{
-				spdlog::debug("Trying to load \"{}\"", entry.path().string());
-				HMODULE scriptLib = LoadLibraryW(entry.path().generic_wstring().c_str());
-				if (scriptLib) {
-					LibTickFunc libTick = (LibTickFunc)GetProcAddress(scriptLib, "Tick");
-					LibInitFunc libInit = (LibInitFunc)GetProcAddress(scriptLib, "Init");
-					LibKeyDown libKeyDown = (LibKeyDown)GetProcAddress(scriptLib, "OnKeyDown");
-					LibKeyUp libKeyUp = (LibKeyUp)GetProcAddress(scriptLib, "OnKeyUp");
-
-					if (libInit && libTick)
-					{
-						libInit(_GetNativeAddress, _GetGlobalPointer);
-						auto ticker = CScriptManager::Instance().CreateTicker(libTick);
-
-						if (libKeyDown)
-						{
-							spdlog::debug("OnKeyDown event bound for {}", filenameStr);
-							ticker->BindKeyDown(libKeyDown);
-						}
-						if (libKeyUp)
-						{
-							ticker->BindKeyUp(libKeyUp);
-							spdlog::debug("OnKeyUp event bound for {}", filenameStr);
-						}
-
-						spdlog::info("{} successfully loaded", filenameStr);
-					}
-					else
-						spdlog::error("{} load error. Init() and Tick() functions must be present in script DLL", filenameStr);
-				}
-				else
-					spdlog::error("{} load error", filenameStr);
-			}
-		}
+		spdlog::error("Failed to initialize Wasmtime");
+		return;
 	}
 
-	// Load JavaScript mods from mods/ directory
-	LoadJavaScriptMods();
-
-	needReceiveEvents = true;
-}
-
-void CScriptManager::LoadJavaScriptMods()
-{
-	spdlog::info("Initializing JavaScript runtime...");
-
-	// Wire the game-side resolvers used by Native.invoke / Global.* etc.
-	rdr2js::InstallGameBridge(_GetNativeAddress, _GetGlobalPointer);
-
-	// Force the Runtime singleton to spin up (also runs one-time JSC init).
-	(void)rdr2js::GetRuntime();
-
-	auto& modLoader = rdr2js::GetModLoader();
+	auto& modLoader = rdr2wasm::GetModLoader();
 	if (!modLoader.Initialize(wClientPath))
 	{
 		spdlog::error("Failed to initialize mod loader");
@@ -239,26 +130,33 @@ void CScriptManager::LoadJavaScriptMods()
 	int loadedCount = modLoader.LoadAllMods();
 	if (loadedCount > 0)
 	{
-		jsModsLoaded = true;
+		wasmModsLoaded = true;
 	}
 }
 
-void CScriptManager::UpdateJavaScriptMods()
+void CScriptManager::UpdateWasmMods()
 {
-	if (!jsModsLoaded) return;
-	rdr2js::GetModLoader().TickAll();
+	if (!wasmModsLoaded) return;
+	rdr2wasm::GetModLoader().TickAll();
 }
 
-void CScriptManager::OnJSKeyDown(uint32_t key)
+void CScriptManager::OnWasmKeyDown(uint32_t key)
 {
-	if (!jsModsLoaded) return;
-	rdr2js::GetModLoader().OnKeyDownAll(key);
+	if (!wasmModsLoaded) return;
+	rdr2wasm::GetModLoader().OnKeyDownAll(key);
 }
 
-void CScriptManager::OnJSKeyUp(uint32_t key)
+void CScriptManager::OnWasmKeyUp(uint32_t key)
 {
-	if (!jsModsLoaded) return;
-	rdr2js::GetModLoader().OnKeyUpAll(key);
+	if (!wasmModsLoaded) return;
+	rdr2wasm::GetModLoader().OnKeyUpAll(key);
+}
+
+void CScriptManager::ShutdownWasmMods()
+{
+	if (!wasmModsLoaded) return;
+	rdr2wasm::GetModLoader().UnloadAllMods();
+	wasmModsLoaded = false;
 }
 
 LRESULT CScriptManager::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
@@ -324,19 +222,3 @@ void* CScriptManager::GetGlobalPointer(uint32_t globalId)
 	int secondArrayId = globalId & 0x3ffff;
 	return (void*)&globalsPtr[firstArrayId][secondArrayId];
 }
-
-bool CScriptManager::RegisterThread(GtaThread* thread)
-{
-	auto context = thread->GetContext();
-
-	context->threadId = GetNextScriptID();
-	context->scriptHash = context->threadId;
-	thread->scriptHash = context->threadId;
-
-	thread->Reset(context->scriptHash, nullptr, 0);
-
-	spdlog::debug("Created Thread with ID: {} ptr: {}", thread->GetId(), (void*)thread);
-
-	return true;
-}
-
