@@ -1,5 +1,22 @@
 #pragma once
 
+#include <cstdint>
+
+// MSVC's <thread> expects these declarations, but clang-cl can miss them when
+// a project-local Process.h shadows the CRT's <process.h>.
+#if defined(_WIN32) && defined(__clang__)
+extern "C" {
+    uintptr_t __cdecl _beginthreadex(
+        void* security,
+        unsigned stackSize,
+        unsigned (__stdcall* startAddress)(void*),
+        void* argument,
+        unsigned initFlag,
+        unsigned* threadAddress);
+    void __cdecl _endthreadex(unsigned returnCode);
+}
+#endif
+
 #include <spdlog/spdlog.h>
 #include <spdlog/sinks/basic_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>

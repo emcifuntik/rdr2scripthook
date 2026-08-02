@@ -1,9 +1,14 @@
-# Example JavaScript Mod for RDR2 Script Hook
-# This demonstrates the basic mod structure and API usage
+# Rust WebAssembly trainer for RDR2 Script Hook.
 
 [mod]
-name = "Example JavaScript Mod"
-version = "1.0.0"
+name = "Rust WASM Trainer"
+version = "2.0.0"
 author = "RDR2 Script Hook"
-description = "A simple example mod demonstrating the JavaScript API"
-entrypoint = "main.js"
+description = "WebView-powered trainer implemented as a sandboxed Rust WebAssembly mod"
+entrypoint = "main.wasm"
+
+[[input.bindings]]
+id = "toggle_trainer"
+description = "Open/close WebView trainer"
+mapper = "keyboard"
+default = "F3"

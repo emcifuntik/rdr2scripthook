@@ -1,6 +1,0 @@
-[mod]
-name = "Simple Trainer"
-version = "1.0.0"
-author = "RDR2 Script Hook"
-description = "A trainer menu with vehicles, peds, teleport, weather, and time controls"
-entrypoint = "main.js"

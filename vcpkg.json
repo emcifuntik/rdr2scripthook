@@ -4,9 +4,11 @@
   "version": "1.0.0",
   "dependencies": [
     "minhook",
-    "javascriptcore",
-    "embeddedjsc",
+    "jitasm",
     "toml11",
-    "spdlog"
+    "spdlog",
+    "wasmtime",
+    "webview2",
+    "vulkan-headers"
   ]
 }

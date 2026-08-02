@@ -1,30 +1,33 @@
 #pragma once
+
 #include "scrThread.h"
 
 class GtaThread : public rage::scrThread
 {
-	class PushState
-	{
-	public:
-		PushState(rage::scrThread* thread);
-		~PushState();
-
-	private:
-		rage::scrThread* prevThread;
-	};
-
 public:
-	virtual ~GtaThread() = default;
+    class ScopedActiveThread
+    {
+    public:
+        explicit ScopedActiveThread(rage::scrThread* thread);
+        ~ScopedActiveThread();
 
-	PushState Push() { return PushState{ this }; };
+        ScopedActiveThread(const ScopedActiveThread&) = delete;
+        ScopedActiveThread& operator=(const ScopedActiveThread&) = delete;
 
-	rage::eThreadState Reset(rage::scrProgramId scriptHash, void const* pArgs, int argCount) override;
-	rage::eThreadState Run(int opsToExecute) override;
-	rage::eThreadState Update(int opsToExecute) override;
-	void Kill() override;
+    private:
+        rage::scrThread* previousThread;
+    };
 
-	virtual void Execute() = 0;
+    virtual ~GtaThread() = default;
 
-	inline void * GetScriptHandler() { return scriptHandler; }
+    ScopedActiveThread Activate() { return ScopedActiveThread(this); }
+
+    rage::eThreadState Reset(rage::scrProgramId scriptHash, const void* arguments,
+                             int argumentCount) override;
+    rage::eThreadState Run(int operationCount) override;
+    rage::eThreadState Update(int operationCount) override;
+    void Kill() override;
+
+    virtual void Execute() = 0;
 };
 VALIDATE_SIZE(GtaThread, 0x788);

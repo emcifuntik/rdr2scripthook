@@ -1,0 +1,108 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+    steps:
+      - name: Validate semantic version
+        id: tag
+        shell: bash
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Expected a stable semantic version tag such as v1.2.3, got: $TAG" >&2
+            exit 1
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build release package
+    needs: validate
+    uses: ./.github/workflows/build.yml
+    permissions:
+      contents: read
+
+  release:
+    name: Publish GitHub Release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download runtime package
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact-name }}
+          path: dist/package
+
+      - name: Create release archive and checksum
+        id: package
+        shell: bash
+        env:
+          VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          for path in \
+            launcher.exe \
+            launcher-hook.dll \
+            rdrhook.dll \
+            crossmap.dat \
+            epic.bat \
+            README.md \
+            LICENSE; do
+            test -f "dist/package/$path" || {
+              echo "Release package is missing $path" >&2
+              exit 1
+            }
+          done
+          test -d dist/package/mods || {
+            echo 'Release package is missing the mods directory' >&2
+            exit 1
+          }
+
+          archive="rdr2scripthook-${VERSION}-windows-x64.zip"
+          mkdir -p release
+          (cd dist/package && zip -9 -r "../../release/$archive" .)
+          (cd release && sha256sum "$archive" > "$archive.sha256")
+
+          echo "archive=release/$archive" >> "$GITHUB_OUTPUT"
+          echo "checksum=release/$archive.sha256" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          ARCHIVE: ${{ steps.package.outputs.archive }}
+          CHECKSUM: ${{ steps.package.outputs.checksum }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ARCHIVE" "$CHECKSUM" --clobber
+          else
+            gh release create "$TAG" "$ARCHIVE" "$CHECKSUM" \
+              --verify-tag \
+              --title "RDR2 Script Hook $TAG" \
+              --generate-notes
+          fi

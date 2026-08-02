@@ -1,0 +1,9 @@
+[package]
+name = "rdr2-wasm"
+version = "1.0.0"
+edition = "2021"
+description = "Rust guest SDK for RDR2 ScriptHook WebAssembly mods"
+license = "MIT"
+
+[lib]
+crate-type = ["rlib"]

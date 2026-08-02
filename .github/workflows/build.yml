@@ -1,0 +1,159 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - '**'
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    outputs:
+      artifact-name:
+        description: Name of the packaged Windows runtime artifact.
+        value: ${{ jobs.build.outputs.artifact-name }}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  VCPKG_DISABLE_METRICS: 1
+  VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/BUILD/vcpkg-binary-cache,readwrite
+  VSCMD_SKIP_SENDTELEMETRY: 1
+
+jobs:
+  build:
+    name: Windows x64 Release
+    runs-on: windows-latest
+    timeout-minutes: 120
+    outputs:
+      artifact-name: ${{ steps.package.outputs.artifact-name }}
+
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Initialize the MSVC environment
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $installPath = & $vswhere `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if ([string]::IsNullOrWhiteSpace($installPath)) {
+            throw 'Could not locate Visual Studio C++ Build Tools'
+          }
+
+          $before = @{}
+          Get-ChildItem Env: | ForEach-Object { $before[$_.Name] = $_.Value }
+
+          $devShell = Join-Path $installPath 'Common7\Tools\Microsoft.VisualStudio.DevShell.dll'
+          Import-Module $devShell
+          Enter-VsDevShell `
+            -VsInstallPath $installPath `
+            -SkipAutomaticLocation `
+            -DevCmdArguments '-arch=x64 -host_arch=x64'
+
+          Get-ChildItem Env: | ForEach-Object {
+            if (-not $before.ContainsKey($_.Name) -or $before[$_.Name] -ne $_.Value) {
+              $delimiter = "MSVC_$([guid]::NewGuid().ToString('N'))"
+              Add-Content -LiteralPath $env:GITHUB_ENV -Value "$($_.Name)<<$delimiter"
+              Add-Content -LiteralPath $env:GITHUB_ENV -Value $_.Value
+              Add-Content -LiteralPath $env:GITHUB_ENV -Value $delimiter
+            }
+          }
+
+          & clang-cl --version
+          if ($LASTEXITCODE -ne 0) { throw "clang-cl initialization failed: $LASTEXITCODE" }
+
+      - name: Install Rust targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown, wasm32-wasip1
+
+      - name: Cache build data
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~\.cargo\git
+            ~\.cargo\registry
+            scripts\example-wasm\target
+            scripts\javy-wasm\plugin\target
+            BUILD\javy-src
+            BUILD\vcpkg-binary-cache
+          key: windows-build-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**', '**/Cargo.lock', 'scripts/javy-wasm/build.ps1', 'scripts/javy-wasm/javy-9.1-runtime.patch') }}
+          restore-keys: |
+            windows-build-
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          & .\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed: $LASTEXITCODE" }
+
+      - name: Build bundled WASM mods
+        shell: pwsh
+        run: |
+          cargo build --manifest-path scripts/example-wasm/Cargo.toml --target wasm32-unknown-unknown --release --locked
+          if ($LASTEXITCODE -ne 0) { throw "Rust example build failed: $LASTEXITCODE" }
+
+          Copy-Item `
+            -LiteralPath scripts/example-wasm/target/wasm32-unknown-unknown/release/example_mod.wasm `
+            -Destination shared/static/mods/example-mod/main.wasm `
+            -Force
+
+          & .\scripts\javy-wasm\build.ps1
+          if ($LASTEXITCODE -ne 0) { throw "Javy example build failed: $LASTEXITCODE" }
+
+      - name: Configure
+        shell: pwsh
+        run: cmake --preset windows-release
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build --preset windows-release
+
+      - name: Run WASM smoke tests
+        shell: pwsh
+        run: |
+          & .\BIN\Release\wasmtest.exe
+          if ($LASTEXITCODE -ne 0) { throw "wasmtest failed: $LASTEXITCODE" }
+
+      - name: Stage runtime package
+        id: package
+        shell: pwsh
+        run: |
+          $packagePath = Join-Path $PWD 'BUILD\package'
+          if (Test-Path -LiteralPath $packagePath) {
+            Remove-Item -LiteralPath $packagePath -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $packagePath | Out-Null
+
+          Copy-Item -LiteralPath BIN/Release/launcher.exe -Destination $packagePath
+          Copy-Item -LiteralPath BIN/Release/launcher-hook.dll -Destination $packagePath
+          Copy-Item -LiteralPath BIN/Release/rdrhook.dll -Destination $packagePath
+          Copy-Item -LiteralPath BIN/Release/mods -Destination $packagePath -Recurse
+          Copy-Item -LiteralPath BIN/Release/crossmap.dat -Destination $packagePath
+          Copy-Item -LiteralPath BIN/Release/epic.bat -Destination $packagePath
+          Copy-Item -LiteralPath README.md -Destination $packagePath
+          Copy-Item -LiteralPath LICENSE -Destination $packagePath
+
+          "artifact-name=rdr2scripthook-windows-x64-$env:GITHUB_SHA" >> $env:GITHUB_OUTPUT
+
+      - name: Upload runtime package
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.package.outputs.artifact-name }}
+          path: BUILD/package
+          if-no-files-found: error
+          compression-level: 9
+          retention-days: 14

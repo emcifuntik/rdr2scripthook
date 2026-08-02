@@ -1,82 +1,86 @@
 #include "stdafx.h"
 
 #include "GtaThread.h"
+
 #include "CScriptManager.h"
 
-static void(*ScriptThreadInit)(GtaThread*);
-static rage::eThreadState(*ScriptThreadTick)(GtaThread*, uint32_t);
-
-static CMemory::Hook scrHook([] {
-	constexpr CMemory::Pattern initScrThreadPat("48 89 5C 24 ? 57 48 83 EC ? 83 89 ? ? ? ? ? 33 FF 83 A1");
-	constexpr CMemory::Pattern gtaThreadTickPat("48 89 5C 24 ? 57 48 83 EC ? 80 B9 ? ? ? ? ? 8B FA 48 8B D9 74 ? 8B 41");
-
-	ScriptThreadInit = initScrThreadPat.Search().Get<void(*)(GtaThread*)>();
-	ScriptThreadTick = gtaThreadTickPat.Search().Get<rage::eThreadState(*)(GtaThread*, uint32_t)>();
-});
-
-rage::eThreadState GtaThread::Update(int opsToExecute)
+namespace
 {
-	return ScriptThreadTick(this, opsToExecute);
+void (*InitializeScriptThread)(GtaThread*) = nullptr;
+rage::eThreadState (*TickScriptThread)(GtaThread*, uint32_t) = nullptr;
+
+CMemory::Hook ScriptThreadHooks([] {
+    constexpr CMemory::Pattern initializePattern(
+        "48 89 5C 24 ? 57 48 83 EC ? 83 89 ? ? ? ? ? 33 FF 83 A1");
+    constexpr CMemory::Pattern tickPattern(
+        "48 89 5C 24 ? 57 48 83 EC ? 80 B9 ? ? ? ? ? 8B FA 48 8B D9 74 ? 8B 41");
+
+    InitializeScriptThread =
+        initializePattern.Search().Get<decltype(InitializeScriptThread)>();
+    TickScriptThread = tickPattern.Search().Get<decltype(TickScriptThread)>();
+});
+}
+
+rage::eThreadState GtaThread::Update(int operationCount)
+{
+    return TickScriptThread(this, operationCount);
 }
 
 void GtaThread::Kill()
 {
-	constexpr CMemory::Pattern gtaThreadKillPat("48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B F9 8B 49");
-	static auto gtaThreadKill = gtaThreadKillPat.Search().Get<void(*)(GtaThread*)>();
-	return gtaThreadKill(this);
+    constexpr CMemory::Pattern killPattern(
+        "48 89 5C 24 ? 48 89 74 24 ? 57 48 83 EC ? 48 8B F9 8B 49");
+    static auto killScriptThread =
+        killPattern.Search().Get<void (*)(GtaThread*)>();
+    killScriptThread(this);
 }
 
-rage::eThreadState GtaThread::Run(int opsToExecute)
+rage::eThreadState GtaThread::Run(int)
 {
-	auto state = Push();
-
-	if (context.scriptState != rage::ThreadStateKilled)
-		Execute();
-
-	return context.scriptState;
+    auto activeThread = Activate();
+    if (context.scriptState != rage::ThreadStateKilled)
+        Execute();
+    return context.scriptState;
 }
 
-rage::eThreadState GtaThread::Reset(rage::scrProgramId hash, void const* pArgs, int argCount)
+rage::eThreadState GtaThread::Reset(rage::scrProgramId hash, const void*, int)
 {
-	memset(&context, 0, sizeof(context));
+    std::memset(&context, 0, sizeof(context));
+    context.scriptState = rage::ThreadStateIdle;
+    context.scriptHash = hash;
+    context.unk1 = -1;
+    context.unk2 = -1;
+    context.unk3 = 1;
 
-	context.scriptState = rage::eThreadState::ThreadStateIdle;
-	context.scriptHash = hash;
-	context.unk1 = -1;
-	context.unk2 = -1;
-	context.unk3 = 1;
+    *reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(this) + 0x720) = 0;
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(this) + 0x728) = 0;
+    *reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(this) + 0x730) = 0;
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(this) + 0x738) = 0;
+    *reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(this) + 0x740) = 0;
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(this) + 0x748) = 0;
+    *reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(this) + 0x750) = 0;
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(this) + 0x758) = 0;
+    *reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(this) + 0x760) = 0;
+    *reinterpret_cast<uint32_t*>(reinterpret_cast<uintptr_t>(this) + 0x768) = 0;
+    *reinterpret_cast<uint8_t*>(reinterpret_cast<uintptr_t>(this) + 0x770) = 0;
+    *reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(this) + 0x6E0) = 0;
+    *reinterpret_cast<bool*>(reinterpret_cast<uintptr_t>(this) + 0x71A) = false;
 
-	*(uint64_t*)(this + 0x720) = 0i64;
-	*(uint32_t*)(this + 0x728) = 0;
-	*(uint64_t*)(this + 0x730) = 0i64;
-	*(uint32_t*)(this + 0x738) = 0;
-	*(uint64_t*)(this + 0x740) = 0i64;
-	*(uint32_t*)(this + 0x748) = 0;
-	*(uint64_t*)(this + 0x750) = 0i64;
-	*(uint32_t*)(this + 0x758) = 0;
-	*(uint64_t*)(this + 0x760) = 0i64;
-	*(uint32_t*)(this + 0x768) = 0;
-	*(uint8_t*)(this + 0x770) = 0;
-	*(uint64_t*)(this + 0x6E0) = 0i64;
-	*(bool*)(this + 0x71A) = false;
+    InitializeScriptThread(this);
+    exitMessage = const_cast<char*>("Not aborted yet?");
+    context.threadId = hash;
 
-	ScriptThreadInit(this);
-
-	exitMessage = (char*)"Not aborted yet?";
-	
-	context.threadId = hash;
-
-	CScriptManager::Instance().GetScriptHandleMgr()->RegisterScript(*this);
-	return context.scriptState;
+    CScriptManager::Instance().GetScriptHandlerManager()->RegisterScript(*this);
+    return context.scriptState;
 }
 
-GtaThread::PushState::PushState(rage::scrThread* thread)
+GtaThread::ScopedActiveThread::ScopedActiveThread(rage::scrThread* thread)
+    : previousThread(CScriptManager::Instance().GetActiveThread())
 {
-	prevThread = CScriptManager::Instance().GetActiveThread();
-	CScriptManager::Instance().SetActiveThread(thread);
+    CScriptManager::Instance().SetActiveThread(thread);
 }
 
-GtaThread::PushState::~PushState()
+GtaThread::ScopedActiveThread::~ScopedActiveThread()
 {
-	CScriptManager::Instance().SetActiveThread(prevThread);
+    CScriptManager::Instance().SetActiveThread(previousThread);
 }

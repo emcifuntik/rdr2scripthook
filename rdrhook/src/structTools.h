@@ -1,5 +1,7 @@
 #pragma once
 
-#define VALIDATE_SIZE(struc, size) static_assert(sizeof(struc) == size, "Invalid structure size of " #struc)
-#define VALIDATE_OFFSET(struc, member, offset) \
-static_assert(offsetof(struc, member) == offset, "The offset of " #member " in " #struc " is not " #offset "...")
+#define VALIDATE_SIZE(structure, size) \
+    static_assert(sizeof(structure) == size, "Invalid structure size of " #structure)
+#define VALIDATE_OFFSET(structure, member, offset)                              \
+    static_assert(offsetof(structure, member) == offset,                        \
+                  "Invalid offset of " #member " in " #structure)

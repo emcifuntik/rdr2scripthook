@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "CMemory.h"
 #include <DbgHelp.h>
+#include <atomic>
 #include <ctime>
 #include <iomanip>
 #include <sstream>
@@ -12,8 +13,8 @@ extern std::wstring _moduleDir;
 
 namespace {
 
-// Original function pointer
-bool (*g_OriginalCrashHandler)() = nullptr;
+LPTOP_LEVEL_EXCEPTION_FILTER g_previousExceptionFilter = nullptr;
+std::atomic_flag g_dumpStarted = ATOMIC_FLAG_INIT;
 
 // Create crashes folder if it doesn't exist
 std::wstring GetCrashesFolder()
@@ -35,8 +36,7 @@ std::wstring GetTimestampString()
     return wss.str();
 }
 
-// Write minidump file
-bool WriteMiniDump(EXCEPTION_POINTERS* exceptionInfo = nullptr)
+bool WriteFullMemoryDump(EXCEPTION_POINTERS* exceptionInfo)
 {
     std::wstring crashesFolder = GetCrashesFolder();
     std::wstring timestamp = GetTimestampString();
@@ -58,35 +58,33 @@ bool WriteMiniDump(EXCEPTION_POINTERS* exceptionInfo = nullptr)
         return false;
     }
 
-    MINIDUMP_EXCEPTION_INFORMATION mdei = {};
-    MINIDUMP_EXCEPTION_INFORMATION* pMdei = nullptr;
+    MINIDUMP_EXCEPTION_INFORMATION dumpException = {};
+    dumpException.ThreadId = GetCurrentThreadId();
+    dumpException.ExceptionPointers = exceptionInfo;
+    dumpException.ClientPointers = FALSE;
 
-    if (exceptionInfo)
-    {
-        mdei.ThreadId = GetCurrentThreadId();
-        mdei.ExceptionPointers = exceptionInfo;
-        mdei.ClientPointers = FALSE;
-        pMdei = &mdei;
-    }
-
-    // Include useful information in the dump
-    MINIDUMP_TYPE dumpType = static_cast<MINIDUMP_TYPE>(
-        MiniDumpWithDataSegs |
+    const MINIDUMP_TYPE dumpType = static_cast<MINIDUMP_TYPE>(
+        MiniDumpWithFullMemory |
+        MiniDumpWithFullMemoryInfo |
         MiniDumpWithHandleData |
-        MiniDumpWithIndirectlyReferencedMemory |
+        MiniDumpWithUnloadedModules |
         MiniDumpWithProcessThreadData |
-        MiniDumpWithThreadInfo
+        MiniDumpWithThreadInfo |
+        MiniDumpIgnoreInaccessibleMemory
     );
 
-    BOOL success = MiniDumpWriteDump(
+    spdlog::info("[MiniDump] Writing full-memory crash dump...");
+
+    const BOOL success = MiniDumpWriteDump(
         GetCurrentProcess(),
         GetCurrentProcessId(),
         hFile,
         dumpType,
-        pMdei,
+        &dumpException,
         nullptr,
         nullptr
     );
+    const DWORD writeError = success ? ERROR_SUCCESS : GetLastError();
 
     CloseHandle(hFile);
 
@@ -97,74 +95,45 @@ bool WriteMiniDump(EXCEPTION_POINTERS* exceptionInfo = nullptr)
     }
     else
     {
-        spdlog::error("[MiniDump] Failed to write dump: {}", GetLastError());
+        spdlog::error("[MiniDump] Failed to write dump: {}", writeError);
     }
 
     return success != FALSE;
 }
 
-// Vectored exception handler for capturing crash context
-LONG WINAPI VectoredExceptionHandler(EXCEPTION_POINTERS* exceptionInfo)
+LONG WINAPI UnhandledExceptionHandler(EXCEPTION_POINTERS* exceptionInfo)
 {
-    // Only handle fatal exceptions
-    switch (exceptionInfo->ExceptionRecord->ExceptionCode)
+    LONG disposition = EXCEPTION_CONTINUE_SEARCH;
+    if (g_previousExceptionFilter &&
+        g_previousExceptionFilter != UnhandledExceptionHandler)
     {
-    case EXCEPTION_ACCESS_VIOLATION:
-    case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
-    case EXCEPTION_DATATYPE_MISALIGNMENT:
-    case EXCEPTION_FLT_DIVIDE_BY_ZERO:
-    case EXCEPTION_FLT_OVERFLOW:
-    case EXCEPTION_FLT_UNDERFLOW:
-    case EXCEPTION_ILLEGAL_INSTRUCTION:
-    case EXCEPTION_INT_DIVIDE_BY_ZERO:
-    case EXCEPTION_INT_OVERFLOW:
-    case EXCEPTION_PRIV_INSTRUCTION:
-    case EXCEPTION_STACK_OVERFLOW:
-        spdlog::error("[MiniDump] Fatal exception caught: 0x{:08X} at 0x{:016X}",
+        disposition = g_previousExceptionFilter(exceptionInfo);
+    }
+
+    // A previous filter can recover by explicitly continuing execution.
+    if (disposition == EXCEPTION_CONTINUE_EXECUTION ||
+        !exceptionInfo || !exceptionInfo->ExceptionRecord)
+    {
+        return disposition;
+    }
+
+    // A terminal process can have multiple faulting threads. Capture only the
+    // first unrecoverable exception so dumps cannot overwrite one another.
+    if (!g_dumpStarted.test_and_set())
+    {
+        spdlog::error("[MiniDump] Unrecoverable exception caught: 0x{:08X} at 0x{:016X}",
             exceptionInfo->ExceptionRecord->ExceptionCode,
             reinterpret_cast<uintptr_t>(exceptionInfo->ExceptionRecord->ExceptionAddress));
-        WriteMiniDump(exceptionInfo);
-        break;
-    default:
-        break;
+        WriteFullMemoryDump(exceptionInfo);
     }
 
-    return EXCEPTION_CONTINUE_SEARCH;
+    return disposition;
 }
 
-// Hooked crash handler - replaces game's crash handler
-bool CrashHandler_Hook()
-{
-    spdlog::info("[MiniDump] Game crash handler triggered");
-
-    // Write a minidump without exception info (game detected the crash internally)
-    WriteMiniDump(nullptr);
-
-    // Return true to indicate we handled it (prevents game's crash reporter)
-    // Return false if you want the game to continue with its crash handling
-    return true;
-}
-
-// Hook registration
 CMemory::Hook _CrashHandlerHook([]() {
-    // Pattern: 40 53 48 83 EC ? E8 ? ? ? ? 8A D8 84 C0
-    // This is the game's internal crash detection function
-    constexpr CMemory::Pattern crashHandlerPattern("40 53 48 83 EC ? E8 ? ? ? ? 8A D8 84 C0");
-    CMemory crashHandler = crashHandlerPattern.Search();
-
-    if (crashHandler.IsValid())
-    {
-        crashHandler.Detour(CrashHandler_Hook, &g_OriginalCrashHandler);
-        spdlog::info("[MiniDump] Crash handler hooked successfully");
-
-        // Also register a vectored exception handler for additional crash capture
-        AddVectoredExceptionHandler(1, VectoredExceptionHandler);
-        spdlog::info("[MiniDump] Vectored exception handler registered");
-    }
-    else
-    {
-        spdlog::warn("[MiniDump] Failed to find crash handler pattern");
-    }
+    g_previousExceptionFilter =
+        SetUnhandledExceptionFilter(UnhandledExceptionHandler);
+    spdlog::info("[MiniDump] Unhandled exception filter registered");
 });
 
 } // anonymous namespace

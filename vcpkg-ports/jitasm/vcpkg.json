@@ -1,0 +1,8 @@
+{
+  "name": "jitasm",
+  "version-date": "2022-06-07",
+  "description": "Header-only x86/x64 runtime assembler",
+  "homepage": "https://github.com/citizenfx/jitasm",
+  "license": "BSD-3-Clause",
+  "supports": "windows & x64"
+}
