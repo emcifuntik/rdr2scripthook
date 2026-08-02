@@ -3,6 +3,10 @@
 #include "Logger.h"
 #include "Mod.h"
 #include "Runtime.h"
+#ifndef RDR2_WASM_TEST
+#include "input/GameInputHook.h"
+#include "webview/WebViewOverlay.h"
+#endif
 
 #include <Windows.h>
 
@@ -14,8 +18,11 @@
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <optional>
+#include <mutex>
 #include <string_view>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <wasmtime.h>
@@ -29,6 +36,12 @@ constexpr size_t MaxGuestString = 1024 * 1024;
 
 uint8_t g_keyStates[256]{};
 uint8_t g_previousKeyStates[256]{};
+#ifndef RDR2_WASM_TEST
+std::optional<std::string> g_pendingWebViewMessage;
+std::mutex g_cursorOwnerMutex;
+std::unordered_map<Mod*, std::uint32_t> g_cursorOwners;
+Mod* g_webViewOwner = nullptr;
+#endif
 
 enum class NativeArgKind : uint32_t {
     Raw = 0,
@@ -120,6 +133,24 @@ bool SafeCall(NativeHandler handler, NativeContext* context) {
         return false;
     }
 }
+
+#ifndef RDR2_WASM_TEST
+bool InvokeGameNative(uint64_t hash,
+                      std::initializer_list<uint64_t> arguments) {
+    const auto getNativeAddress = GetNativeAddrFn();
+    if (!getNativeAddress) return false;
+
+    const uintptr_t address = getNativeAddress(hash);
+    if (!address) return false;
+
+    NativeContext context;
+    context.Reset();
+    for (const uint64_t argument : arguments) {
+        if (!context.Push(argument)) return false;
+    }
+    return SafeCall(reinterpret_cast<NativeHandler>(address), &context);
+}
+#endif
 
 void SafeCopyResults(NativeContext* context) {
     __try {
@@ -298,9 +329,10 @@ struct ScratchBuffer {
     std::vector<uint8_t> bytes;
 };
 
-wasm_trap_t* HostNativeInvoke(void*, wasmtime_caller_t* caller,
+wasm_trap_t* HostNativeInvoke(void* environment, wasmtime_caller_t* caller,
                               const wasmtime_val_t* args, size_t,
                               wasmtime_val_t* results, size_t) {
+    auto& mod = *static_cast<Mod*>(environment);
     auto finish = [&](NativeStatus status) {
         results[0].kind = WASMTIME_I32;
         results[0].of.i32 = static_cast<int32_t>(status);
@@ -408,6 +440,9 @@ wasm_trap_t* HostNativeInvoke(void*, wasmtime_caller_t* caller,
     }
 
     if (!SafeCall(reinterpret_cast<NativeHandler>(address), &nativeContext)) {
+        spdlog::error(
+            "[WASM:{}] Game native 0x{:016X} raised an exception with {} argument(s)",
+            mod.Manifest().name, hash, argumentCount);
         return finish(NativeStatus::Crashed);
     }
     SafeCopyResults(&nativeContext);
@@ -557,7 +592,416 @@ wasm_trap_t* HostIsKeyJustPressed(void*, wasmtime_caller_t*,
     return nullptr;
 }
 
+#ifndef RDR2_WASM_TEST
+void SetI32Result(wasmtime_val_t* results, int32_t value) {
+    results[0].kind = WASMTIME_I32;
+    results[0].of.i32 = value;
+}
+
+std::uint32_t CursorReferencesOwnedBy(Mod& mod) {
+    std::lock_guard lock(g_cursorOwnerMutex);
+    const auto owner = g_cursorOwners.find(&mod);
+    return owner == g_cursorOwners.end() ? 0 : owner->second;
+}
+
+void ReleaseCursorReferencesOwnedBy(Mod& mod) {
+    std::uint32_t references = 0;
+    {
+        std::lock_guard lock(g_cursorOwnerMutex);
+        const auto owner = g_cursorOwners.find(&mod);
+        if (owner == g_cursorOwners.end()) return;
+        references = owner->second;
+        g_cursorOwners.erase(owner);
+    }
+
+    while (references-- != 0)
+        rdr2::input::GameInputHook::ReleaseCursorVisibility();
+}
+
+wasm_trap_t* HostWebViewOpen(void* environment, wasmtime_caller_t* caller,
+                             const wasmtime_val_t* args, size_t,
+                             wasmtime_val_t* results, size_t) {
+    bool valid = false;
+    auto url = GuestString(caller, args[0].of.i32, args[1].of.i32, valid);
+    const int32_t width = args[2].of.i32;
+    const int32_t height = args[3].of.i32;
+    if (!valid || width < 0 || height < 0) {
+        SetI32Result(results, static_cast<int32_t>(
+            rdr2::webview::OverlayStatus::InvalidArgument));
+        return nullptr;
+    }
+
+    const auto status = rdr2::webview::WebViewOverlay::Instance().Open(
+        std::string(url), static_cast<uint32_t>(width),
+        static_cast<uint32_t>(height));
+    if (status == rdr2::webview::OverlayStatus::Ok)
+        g_webViewOwner = static_cast<Mod*>(environment);
+    SetI32Result(results, static_cast<int32_t>(status));
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewClose(void* environment, wasmtime_caller_t*,
+                              const wasmtime_val_t*, size_t,
+                              wasmtime_val_t*, size_t) {
+    ReleaseCursorReferencesOwnedBy(*static_cast<Mod*>(environment));
+    rdr2::webview::WebViewOverlay::Instance().Close();
+    g_webViewOwner = nullptr;
+    g_pendingWebViewMessage.reset();
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewIsFocused(void*, wasmtime_caller_t*,
+                                  const wasmtime_val_t*, size_t,
+                                  wasmtime_val_t* results, size_t) {
+    SetI32Result(results,
+        rdr2::webview::WebViewOverlay::Instance().IsFocused() ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewSetVisible(void*, wasmtime_caller_t*,
+                                   const wasmtime_val_t* args, size_t,
+                                   wasmtime_val_t* results, size_t) {
+    auto& overlay = rdr2::webview::WebViewOverlay::Instance();
+    if (!overlay.IsOpen()) {
+        SetI32Result(results, -6);
+        return nullptr;
+    }
+    overlay.SetVisible(args[0].of.i32 != 0);
+    SetI32Result(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewIsVisible(void*, wasmtime_caller_t*,
+                                  const wasmtime_val_t*, size_t,
+                                  wasmtime_val_t* results, size_t) {
+    SetI32Result(results,
+        rdr2::webview::WebViewOverlay::Instance().IsVisible() ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewShowCursor(void* environment, wasmtime_caller_t*,
+                                   const wasmtime_val_t*, size_t,
+                                   wasmtime_val_t* results, size_t) {
+    auto& overlay = rdr2::webview::WebViewOverlay::Instance();
+    if (!overlay.IsOpen()) {
+        SetI32Result(results, -6);
+        return nullptr;
+    }
+
+    auto& mod = *static_cast<Mod*>(environment);
+    {
+        std::lock_guard lock(g_cursorOwnerMutex);
+        auto& references = g_cursorOwners[&mod];
+        if (references == static_cast<std::uint32_t>(
+                std::numeric_limits<std::int32_t>::max())) {
+            SetI32Result(results, -8);
+            return nullptr;
+        }
+        ++references;
+    }
+    rdr2::input::GameInputHook::AcquireCursorVisibility();
+    SetI32Result(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewHideCursor(void* environment, wasmtime_caller_t*,
+                                   const wasmtime_val_t*, size_t,
+                                   wasmtime_val_t* results, size_t) {
+    auto& mod = *static_cast<Mod*>(environment);
+    {
+        std::lock_guard lock(g_cursorOwnerMutex);
+        const auto owner = g_cursorOwners.find(&mod);
+        if (owner == g_cursorOwners.end() || owner->second == 0) {
+            SetI32Result(results, -7);
+            return nullptr;
+        }
+        if (--owner->second == 0) g_cursorOwners.erase(owner);
+    }
+    rdr2::input::GameInputHook::ReleaseCursorVisibility();
+    SetI32Result(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewIsCursorVisible(void*, wasmtime_caller_t*,
+                                        const wasmtime_val_t*, size_t,
+                                        wasmtime_val_t* results, size_t) {
+    SetI32Result(results,
+        rdr2::input::GameInputHook::CursorVisibilityRequests() != 0 ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewCursorRefCount(void* environment, wasmtime_caller_t*,
+                                       const wasmtime_val_t*, size_t,
+                                       wasmtime_val_t* results, size_t) {
+    SetI32Result(results, static_cast<std::int32_t>(CursorReferencesOwnedBy(
+        *static_cast<Mod*>(environment))));
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewIsOpen(void*, wasmtime_caller_t*,
+                               const wasmtime_val_t*, size_t,
+                               wasmtime_val_t* results, size_t) {
+    SetI32Result(results,
+        rdr2::webview::WebViewOverlay::Instance().IsOpen() ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewSetFocus(void*, wasmtime_caller_t*,
+                                 const wasmtime_val_t* args, size_t,
+                                 wasmtime_val_t* results, size_t) {
+    auto& overlay = rdr2::webview::WebViewOverlay::Instance();
+    if (!overlay.IsOpen()) {
+        SetI32Result(results, -6);
+        return nullptr;
+    }
+    overlay.SetFocused(args[0].of.i32 != 0);
+    SetI32Result(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewNavigate(void*, wasmtime_caller_t* caller,
+                                 const wasmtime_val_t* args, size_t,
+                                 wasmtime_val_t* results, size_t) {
+    bool valid = false;
+    auto url = GuestString(caller, args[0].of.i32, args[1].of.i32, valid);
+    auto& overlay = rdr2::webview::WebViewOverlay::Instance();
+    if (!valid || url.empty()) {
+        SetI32Result(results, -1);
+        return nullptr;
+    }
+    if (!overlay.IsOpen()) {
+        SetI32Result(results, -6);
+        return nullptr;
+    }
+    overlay.Navigate(std::string(url));
+    SetI32Result(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewPostJson(void*, wasmtime_caller_t* caller,
+                                 const wasmtime_val_t* args, size_t,
+                                 wasmtime_val_t* results, size_t) {
+    bool valid = false;
+    auto json = GuestString(caller, args[0].of.i32, args[1].of.i32, valid);
+    auto& overlay = rdr2::webview::WebViewOverlay::Instance();
+    if (!valid || json.empty()) {
+        SetI32Result(results, -1);
+        return nullptr;
+    }
+    if (!overlay.IsOpen()) {
+        SetI32Result(results, -6);
+        return nullptr;
+    }
+    overlay.PostJson(std::string(json));
+    SetI32Result(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostWebViewPollJson(void*, wasmtime_caller_t* caller,
+                                 const wasmtime_val_t* args, size_t,
+                                 wasmtime_val_t* results, size_t) {
+    if (!g_pendingWebViewMessage) {
+        std::string message;
+        if (!rdr2::webview::WebViewOverlay::Instance().PollMessage(message)) {
+            SetI32Result(results, -1);
+            return nullptr;
+        }
+        g_pendingWebViewMessage = std::move(message);
+    }
+
+    const size_t length = g_pendingWebViewMessage->size();
+    if (length > static_cast<size_t>(std::numeric_limits<int32_t>::max())) {
+        g_pendingWebViewMessage.reset();
+        SetI32Result(results, -2);
+        return nullptr;
+    }
+
+    const int32_t capacity = args[1].of.i32;
+    if (capacity < 0) {
+        SetI32Result(results, -2);
+        return nullptr;
+    }
+    if (capacity == 0 || static_cast<size_t>(capacity) < length) {
+        if (length == 0) g_pendingWebViewMessage.reset();
+        SetI32Result(results, static_cast<int32_t>(length));
+        return nullptr;
+    }
+
+    GuestMemory memory;
+    uint8_t* destination = nullptr;
+    if (!GetGuestMemory(caller, memory) ||
+        !memory.Range(args[0].of.i32, length, destination)) {
+        SetI32Result(results, -2);
+        return nullptr;
+    }
+    std::memcpy(destination, g_pendingWebViewMessage->data(), length);
+    g_pendingWebViewMessage.reset();
+    SetI32Result(results, static_cast<int32_t>(length));
+    return nullptr;
+}
+#endif
+
 } // namespace
+
+void PumpGameUiInput() {
+#ifndef RDR2_WASM_TEST
+    // Use only ordinary RDR2 script natives: no Win32 cursor state, import
+    // table, DirectInput device, or protected RAGE function is modified.
+    static bool cursorWasRequested = false;
+    static bool cursorFailureReported = false;
+
+    if (rdr2::input::GameInputHook::IsBlocked())
+        InvokeGameNative(0x5F4B6931816E599B, {0});
+
+    const bool cursorRequested =
+        rdr2::input::GameInputHook::CursorVisibilityRequests() != 0;
+    if (cursorRequested) {
+        if (!InvokeGameNative(0xF12E4CCAF249DC10, {})) {
+            if (!cursorFailureReported) {
+                cursorFailureReported = true;
+                spdlog::error(
+                    "[Input] Could not invoke the RDR2 in-game cursor native");
+            }
+        } else {
+            cursorFailureReported = false;
+        }
+    }
+
+    if (cursorRequested != cursorWasRequested) {
+        spdlog::info("[Input] RDR2 in-game cursor {}",
+                     cursorRequested ? "enabled" : "disabled");
+        cursorWasRequested = cursorRequested;
+    }
+#endif
+}
+
+#ifdef RDR2_WASM_TEST
+bool g_testWebViewOpen = false;
+bool g_testWebViewVisible = false;
+bool g_testWebViewFocused = false;
+std::uint32_t g_testCursorReferences = 0;
+
+void SetTestResult(wasmtime_val_t* results, int32_t value) {
+    results[0].kind = WASMTIME_I32;
+    results[0].of.i32 = value;
+}
+
+wasm_trap_t* HostTestWebViewOpen(void*, wasmtime_caller_t*,
+                                 const wasmtime_val_t*, size_t,
+                                 wasmtime_val_t* results, size_t) {
+    g_testWebViewOpen = true;
+    g_testWebViewVisible = true;
+    SetTestResult(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewClose(void*, wasmtime_caller_t*,
+                                  const wasmtime_val_t*, size_t,
+                                  wasmtime_val_t*, size_t) {
+    g_testWebViewOpen = false;
+    g_testWebViewVisible = false;
+    g_testWebViewFocused = false;
+    g_testCursorReferences = 0;
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewIsOpen(void*, wasmtime_caller_t*,
+                                   const wasmtime_val_t*, size_t,
+                                   wasmtime_val_t* results, size_t) {
+    SetTestResult(results, g_testWebViewOpen ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewSetVisible(void*, wasmtime_caller_t*,
+                                       const wasmtime_val_t* args, size_t,
+                                       wasmtime_val_t* results, size_t) {
+    if (!g_testWebViewOpen) {
+        SetTestResult(results, -6);
+        return nullptr;
+    }
+    g_testWebViewVisible = args[0].of.i32 != 0;
+    SetTestResult(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewIsVisible(void*, wasmtime_caller_t*,
+                                      const wasmtime_val_t*, size_t,
+                                      wasmtime_val_t* results, size_t) {
+    SetTestResult(results, g_testWebViewVisible ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewSetFocus(void*, wasmtime_caller_t*,
+                                     const wasmtime_val_t* args, size_t,
+                                     wasmtime_val_t* results, size_t) {
+    if (!g_testWebViewOpen) {
+        SetTestResult(results, -6);
+        return nullptr;
+    }
+    g_testWebViewFocused = args[0].of.i32 != 0;
+    SetTestResult(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewIsFocused(void*, wasmtime_caller_t*,
+                                      const wasmtime_val_t*, size_t,
+                                      wasmtime_val_t* results, size_t) {
+    SetTestResult(results, g_testWebViewFocused ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewShowCursor(void*, wasmtime_caller_t*,
+                                       const wasmtime_val_t*, size_t,
+                                       wasmtime_val_t* results, size_t) {
+    if (!g_testWebViewOpen) {
+        SetTestResult(results, -6);
+        return nullptr;
+    }
+    ++g_testCursorReferences;
+    SetTestResult(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewHideCursor(void*, wasmtime_caller_t*,
+                                       const wasmtime_val_t*, size_t,
+                                       wasmtime_val_t* results, size_t) {
+    if (g_testCursorReferences == 0) {
+        SetTestResult(results, -7);
+        return nullptr;
+    }
+    --g_testCursorReferences;
+    SetTestResult(results, 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewCursorStatus(void*, wasmtime_caller_t*,
+                                         const wasmtime_val_t*, size_t,
+                                         wasmtime_val_t* results, size_t) {
+    SetTestResult(results, g_testCursorReferences != 0 ? 1 : 0);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewCursorRefCount(void*, wasmtime_caller_t*,
+                                           const wasmtime_val_t*, size_t,
+                                           wasmtime_val_t* results, size_t) {
+    SetTestResult(results, static_cast<int32_t>(g_testCursorReferences));
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewCommand(void*, wasmtime_caller_t*,
+                                    const wasmtime_val_t*, size_t,
+                                    wasmtime_val_t* results, size_t) {
+    SetTestResult(results, g_testWebViewOpen ? 0 : -6);
+    return nullptr;
+}
+
+wasm_trap_t* HostTestWebViewPoll(void*, wasmtime_caller_t*,
+                                 const wasmtime_val_t*, size_t,
+                                 wasmtime_val_t* results, size_t) {
+    SetTestResult(results, -1);
+    return nullptr;
+}
+#endif
 
 bool DefineAll(Mod& mod, wasmtime_linker_t* linker) {
     bool valid = true;
@@ -573,7 +1017,85 @@ bool DefineAll(Mod& mod, wasmtime_linker_t* linker) {
     valid &= Define(linker, mod, "game_time", {}, { WASM_I32 }, HostGameTime);
     valid &= Define(linker, mod, "is_key_pressed", { WASM_I32 }, { WASM_I32 }, HostIsKeyPressed);
     valid &= Define(linker, mod, "is_key_just_pressed", { WASM_I32 }, { WASM_I32 }, HostIsKeyJustPressed);
+#ifndef RDR2_WASM_TEST
+    valid &= Define(linker, mod, "webview_open",
+                    { WASM_I32, WASM_I32, WASM_I32, WASM_I32 },
+                    { WASM_I32 }, HostWebViewOpen);
+    valid &= Define(linker, mod, "webview_close", {}, {}, HostWebViewClose);
+    valid &= Define(linker, mod, "webview_is_open", {}, { WASM_I32 },
+                    HostWebViewIsOpen);
+    valid &= Define(linker, mod, "webview_set_visible", { WASM_I32 },
+                    { WASM_I32 }, HostWebViewSetVisible);
+    valid &= Define(linker, mod, "webview_is_visible", {}, { WASM_I32 },
+                    HostWebViewIsVisible);
+    valid &= Define(linker, mod, "webview_set_focus", { WASM_I32 },
+                    { WASM_I32 }, HostWebViewSetFocus);
+    valid &= Define(linker, mod, "webview_is_focused", {}, { WASM_I32 },
+                    HostWebViewIsFocused);
+    valid &= Define(linker, mod, "webview_show_cursor", {}, { WASM_I32 },
+                    HostWebViewShowCursor);
+    valid &= Define(linker, mod, "webview_hide_cursor", {}, { WASM_I32 },
+                    HostWebViewHideCursor);
+    valid &= Define(linker, mod, "webview_is_cursor_visible", {},
+                    { WASM_I32 }, HostWebViewIsCursorVisible);
+    valid &= Define(linker, mod, "webview_cursor_ref_count", {},
+                    { WASM_I32 }, HostWebViewCursorRefCount);
+    valid &= Define(linker, mod, "webview_navigate", { WASM_I32, WASM_I32 },
+                    { WASM_I32 }, HostWebViewNavigate);
+    valid &= Define(linker, mod, "webview_post_json", { WASM_I32, WASM_I32 },
+                    { WASM_I32 }, HostWebViewPostJson);
+    valid &= Define(linker, mod, "webview_poll_json", { WASM_I32, WASM_I32 },
+                    { WASM_I32 }, HostWebViewPollJson);
+#else
+    // The Javy plugin imports its entire bridge eagerly. Headless smoke tests
+    // do not create a game window, but still need these imports to instantiate.
+    valid &= Define(linker, mod, "webview_open",
+                    { WASM_I32, WASM_I32, WASM_I32, WASM_I32 },
+                    { WASM_I32 }, HostTestWebViewOpen);
+    valid &= Define(linker, mod, "webview_close", {}, {},
+                    HostTestWebViewClose);
+    valid &= Define(linker, mod, "webview_is_open", {}, { WASM_I32 },
+                    HostTestWebViewIsOpen);
+    valid &= Define(linker, mod, "webview_set_visible", { WASM_I32 },
+                    { WASM_I32 }, HostTestWebViewSetVisible);
+    valid &= Define(linker, mod, "webview_is_visible", {}, { WASM_I32 },
+                    HostTestWebViewIsVisible);
+    valid &= Define(linker, mod, "webview_set_focus", { WASM_I32 },
+                    { WASM_I32 }, HostTestWebViewSetFocus);
+    valid &= Define(linker, mod, "webview_is_focused", {}, { WASM_I32 },
+                    HostTestWebViewIsFocused);
+    valid &= Define(linker, mod, "webview_show_cursor", {}, { WASM_I32 },
+                    HostTestWebViewShowCursor);
+    valid &= Define(linker, mod, "webview_hide_cursor", {}, { WASM_I32 },
+                    HostTestWebViewHideCursor);
+    valid &= Define(linker, mod, "webview_is_cursor_visible", {},
+                    { WASM_I32 }, HostTestWebViewCursorStatus);
+    valid &= Define(linker, mod, "webview_cursor_ref_count", {},
+                    { WASM_I32 }, HostTestWebViewCursorRefCount);
+    valid &= Define(linker, mod, "webview_navigate",
+                    { WASM_I32, WASM_I32 }, { WASM_I32 },
+                    HostTestWebViewCommand);
+    valid &= Define(linker, mod, "webview_post_json",
+                    { WASM_I32, WASM_I32 }, { WASM_I32 },
+                    HostTestWebViewCommand);
+    valid &= Define(linker, mod, "webview_poll_json",
+                    { WASM_I32, WASM_I32 }, { WASM_I32 },
+                    HostTestWebViewPoll);
+#endif
     return valid;
+}
+
+void ReleaseOwnedResources(Mod& mod) {
+#ifndef RDR2_WASM_TEST
+    ReleaseCursorReferencesOwnedBy(mod);
+    if (g_webViewOwner == &mod) {
+        g_webViewOwner = nullptr;
+        rdr2::webview::WebViewOverlay::Instance().Close();
+        g_pendingWebViewMessage.reset();
+    }
+#else
+    (void)mod;
+#endif
 }
 
 void PollKeyboard() {
@@ -582,5 +1104,13 @@ void PollKeyboard() {
         g_keyStates[key] = (GetAsyncKeyState(key) & 0x8000) ? 1 : 0;
     }
 }
+
+#ifdef RDR2_WASM_TEST
+void SetKeyStateForTesting(uint32_t key, bool pressed) {
+    if (key >= std::size(g_keyStates)) return;
+    std::memcpy(g_previousKeyStates, g_keyStates, sizeof(g_keyStates));
+    g_keyStates[key] = pressed ? 1 : 0;
+}
+#endif
 
 } // namespace rdr2wasm::bindings

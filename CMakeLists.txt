@@ -16,7 +16,9 @@ set(CMAKE_CONFIGURATION_TYPES Debug Release CACHE STRING "" FORCE)
 
 # Output directories
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/LIB)
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/BIN)
+if(NOT CMAKE_RUNTIME_OUTPUT_DIRECTORY)
+  set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/BIN)
+endif()
 
 # Project paths
 set(RDRHOOK_SHARED ${CMAKE_CURRENT_SOURCE_DIR}/shared)
@@ -44,6 +46,25 @@ add_custom_target(generate_natives
         "${CMAKE_CURRENT_SOURCE_DIR}/nativedb/natives.json"
     BYPRODUCTS
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/rdr2-wasm/src/natives.rs"
+)
+
+# Build the JavaScript example through the pinned Javy toolchain on demand.
+add_custom_target(javy_example
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/build.ps1"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building the Javy JavaScript WASM example..."
+    SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/build.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/exports.wit"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/javy-9.1-runtime.patch"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/plugin/Cargo.toml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/plugin/src/lib.rs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/src/catalog.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/src/entrypoints.js"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/javy-wasm/src/main.js"
+    BYPRODUCTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/shared/static/mods/javy-trainer/main.wasm"
 )
 
 # Target selection

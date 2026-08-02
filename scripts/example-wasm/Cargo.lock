@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "example-mod"
-version = "1.0.0"
+version = "2.0.0"
 dependencies = [
  "rdr2-wasm",
 ]

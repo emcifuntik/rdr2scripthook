@@ -27,7 +27,6 @@ HANDLE_TYPES = {
     "AnimScene", "PersChar", "PopZone", "Prompt", "PropSet",
 }
 
-
 def to_snake_case(name: str) -> str:
     name = name.lstrip("_")
     name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)

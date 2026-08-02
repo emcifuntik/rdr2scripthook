@@ -1,0 +1,7 @@
+package rdr2:trainer;
+
+world trainer {
+    export init: func();
+    export tick: func();
+    export shutdown: func();
+}

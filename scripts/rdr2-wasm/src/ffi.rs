@@ -20,4 +20,19 @@ unsafe extern "C" {
     pub fn game_time() -> u32;
     pub fn is_key_pressed(key: u32) -> i32;
     pub fn is_key_just_pressed(key: u32) -> i32;
+
+    pub fn webview_open(pointer: *const u8, length: i32, width: i32, height: i32) -> i32;
+    pub fn webview_close();
+    pub fn webview_is_open() -> i32;
+    pub fn webview_set_visible(visible: i32) -> i32;
+    pub fn webview_is_visible() -> i32;
+    pub fn webview_set_focus(focused: i32) -> i32;
+    pub fn webview_is_focused() -> i32;
+    pub fn webview_show_cursor() -> i32;
+    pub fn webview_hide_cursor() -> i32;
+    pub fn webview_is_cursor_visible() -> i32;
+    pub fn webview_cursor_ref_count() -> i32;
+    pub fn webview_navigate(pointer: *const u8, length: i32) -> i32;
+    pub fn webview_post_json(pointer: *const u8, length: i32) -> i32;
+    pub fn webview_poll_json(destination: *mut u8, capacity: i32) -> i32;
 }

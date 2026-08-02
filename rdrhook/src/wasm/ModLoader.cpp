@@ -49,12 +49,19 @@ bool ModLoader::ParseManifest(const std::filesystem::path& path,
                 out.description = toml::find<std::string>(mod, "description");
             if (mod.contains("entrypoint"))
                 out.entrypoint = toml::find<std::string>(mod, "entrypoint");
+            if (mod.contains("runtime"))
+                out.runtime = toml::find<std::string>(mod, "runtime");
         }
         out.modPath = path.parent_path();
 
         if (!out.IsValid()) {
             spdlog::error("[WASM] Invalid manifest (name and entrypoint are required): {}",
                           path.string());
+            return false;
+        }
+        if (out.runtime != "wasmtime" && out.runtime != "javy") {
+            spdlog::error("[WASM] Invalid runtime '{}' in {}",
+                          out.runtime, path.string());
             return false;
         }
         return true;

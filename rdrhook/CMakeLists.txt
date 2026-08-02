@@ -48,12 +48,21 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 find_package(toml11 CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(wasmtime CONFIG REQUIRED)
+find_package(unofficial-webview2 CONFIG REQUIRED)
+find_package(VulkanHeaders CONFIG REQUIRED)
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
   minhook::minhook
   toml11::toml11
   spdlog::spdlog
   wasmtime::wasmtime
+  unofficial::webview2::webview2
+  Vulkan::Headers
+  d3d11
+  d3d12
+  dxgi
+  dxguid
+  windowsapp
 )
 
 # Compiler definitions

@@ -3,6 +3,7 @@
 #include "wasm/Bindings.h"
 #include "wasm/ModLoader.h"
 #include "wasm/Runtime.h"
+#include "webview/WebViewOverlay.h"
 #include "Logger.h"
 
 bool(*UpdateSingleScripts_orig)(void*) = nullptr;
@@ -34,14 +35,29 @@ void CScriptManager::HookWinApi()
 	pWndProc = (WNDPROC)SetWindowLongPtr(hWnd, GWLP_WNDPROC, (LONG_PTR)_WndProc);
 }
 
+rage::scrThread* CScriptManager::GetActiveThread() const
+{
+	return currentScriptThread ? *currentScriptThread : nullptr;
+}
+
+void CScriptManager::SetActiveThread(rage::scrThread* thread)
+{
+	if (currentScriptThread)
+		*currentScriptThread = thread;
+}
+
 void CScriptManager::Init()
 {
+	constexpr CMemory::Pattern scriptHandlerManagerPat("48 8D 0D ? ? ? ? E8 ? ? ? ? 84 C0 75 ? 8B 8B ? ? ? ?");
+	constexpr CMemory::Pattern currentScriptThreadPat("48 39 1D ? ? ? ? 75 ? 48 8D 05 ? ? ? ?");
 	constexpr CMemory::Pattern isInSessionPat("80 3D ? ? ? ? ? 74 ? 48 8B 0D ? ? ? ? E8 ? ? ? ? 0F B6 40 ?");
 	constexpr CMemory::Pattern getNativeAddressPat("48 8B 15 ? ? ? ? 4C 8B C9 49 F7 D1");
 	constexpr CMemory::Pattern updateSingleScriptsPat("48 89 5C 24 ? 48 89 6C 24 ? 48 89 74 24 ? 57 41 56 41 57 48 83 EC ? 45 33 F6 BD ? ? ? ?");
 	constexpr CMemory::Pattern shutdownLoadingScreenPat("8A 05 ? ? ? ? 84 C0 75 ? C6 05 ? ? ? ? ?");
 	constexpr CMemory::Pattern globalsPtrPat("4C 8D 05 ? ? ? ? 4D 8B 08 4D 85 C9 74 ? 4D 3B D9");
 
+	scriptHandlerManager = scriptHandlerManagerPat.Search().GetOffset().Get<rage::scriptHandlerMgr*>();
+	currentScriptThread = currentScriptThreadPat.Search().GetOffset(3).Get<rage::scrThread**>();
 	isInSession = isInSessionPat.Search().GetOffset(2).Get<bool*>();
 	GetNativeAddress_orig = getNativeAddressPat.Search().Get<decltype(GetNativeAddress_orig)>();
 	updateSingleScriptsPat.Search().Detour(UpdateSingleScripts_Hook, &UpdateSingleScripts_orig);
@@ -60,6 +76,28 @@ uintptr_t CScriptManager::GetNativeAddress(uint64_t hash)
 	return GetNativeAddress_orig(mapped != crossMap.end() ? mapped->second : hash);
 }
 
+void CScriptManager::WasmScriptThread::Execute()
+{
+	auto& manager = CScriptManager::Instance();
+	if (!manager.wasmModsInitialized)
+	{
+		manager.wasmModsInitialized = true;
+		manager.LoadWasmMods();
+		return;
+	}
+
+	manager.UpdateWasmMods();
+	rdr2wasm::bindings::PumpGameUiInput();
+}
+
+bool CScriptManager::UpdateGtaScript(GtaThread* thread, int operationCount)
+{
+	if (!thread || !thread->context.threadId)
+		return false;
+
+	return thread->Update(operationCount) != rage::ThreadStateKilled;
+}
+
 bool CScriptManager::UpdateSingleScripts(void*)
 {
 	if (*CScriptManager::isInSession)
@@ -74,26 +112,29 @@ bool CScriptManager::UpdateSingleScripts(void*)
 
 	while (PopKeyEvent(key, down)) keys.push_back(std::pair(key, down));
 
-	// Update WebAssembly mods.
 	rdr2wasm::bindings::PollKeyboard();
-	UpdateWasmMods();
+	if (rdr2::webview::WebViewOverlay::Instance().Pump())
+		CScriptManager::PushKeyEvent(VK_F8, true);
 
-	// Dispatch key events to WebAssembly mods.
-	for (auto ev : keys)
-	{
-		if (ev.second) OnWasmKeyDown(ev.first);
-		else OnWasmKeyUp(ev.first);
-	}
-
-	if (!wasmModsInitialized && scriptCanBeStarted)
+	if (!wasmThread && scriptCanBeStarted)
 	{
 		HookWinApi();
-		LoadWasmMods();
-		needReceiveEvents = true;
-		wasmModsInitialized = true;
+		if (StartWasmThread())
+			needReceiveEvents = true;
 	}
 
-	return false;
+	bool running = UpdateGtaScript(wasmThread, 13000000);
+	if (wasmThread)
+	{
+		auto activeThread = wasmThread->Activate();
+		for (const auto& event : keys)
+		{
+			if (event.second) OnWasmKeyDown(event.first);
+			else OnWasmKeyUp(event.first);
+		}
+	}
+
+	return running;
 }
 
 uintptr_t _GetNativeAddress(uint64_t hash)
@@ -161,6 +202,10 @@ void CScriptManager::ShutdownWasmMods()
 
 LRESULT CScriptManager::WndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+	if (rdr2::webview::WebViewOverlay::Instance().HandleWindowMessage(
+			hwnd, uMsg, wParam, lParam))
+		return 0;
+
 	bool callOrig = true;
 
 	switch (uMsg)
@@ -221,4 +266,37 @@ void* CScriptManager::GetGlobalPointer(uint32_t globalId)
 	int firstArrayId = globalId / 0x3ffff;
 	int secondArrayId = globalId & 0x3ffff;
 	return (void*)&globalsPtr[firstArrayId][secondArrayId];
+}
+
+bool CScriptManager::StartWasmThread()
+{
+	auto* thread = new WasmScriptThread();
+	if (!RegisterThread(thread))
+	{
+		delete thread;
+		spdlog::error("Failed to register the Wasmtime game script thread");
+		return false;
+	}
+
+	wasmThread = thread;
+	spdlog::info("Wasmtime game script thread registered with id {}",
+	             wasmThread->GetId());
+	return true;
+}
+
+bool CScriptManager::RegisterThread(GtaThread* thread)
+{
+	if (!thread || !scriptHandlerManager || !currentScriptThread)
+		return false;
+
+	const uint32_t scriptId = GetNextScriptId();
+	thread->scriptHash = scriptId;
+	thread->Reset(scriptId, nullptr, 0);
+	return true;
+}
+
+uint32_t CScriptManager::GetNextScriptId()
+{
+	static uint32_t scriptId = 0xFFFF;
+	return ++scriptId;
 }

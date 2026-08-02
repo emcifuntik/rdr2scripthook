@@ -19,6 +19,26 @@ std::vector<uint8_t> ReadFile(const std::filesystem::path& path) {
              std::istreambuf_iterator<char>() };
 }
 
+ptrdiff_t LogJavyStdout(void* data, const unsigned char* bytes, size_t length) {
+    auto* mod = static_cast<Mod*>(data);
+    std::string message(reinterpret_cast<const char*>(bytes), length);
+    while (!message.empty() && (message.back() == '\r' || message.back() == '\n'))
+        message.pop_back();
+    if (!message.empty())
+        spdlog::info("[WASM:{}] {}", mod->Manifest().name, message);
+    return static_cast<ptrdiff_t>(length);
+}
+
+ptrdiff_t LogJavyStderr(void* data, const unsigned char* bytes, size_t length) {
+    auto* mod = static_cast<Mod*>(data);
+    std::string message(reinterpret_cast<const char*>(bytes), length);
+    while (!message.empty() && (message.back() == '\r' || message.back() == '\n'))
+        message.pop_back();
+    if (!message.empty())
+        spdlog::error("[WASM:{}] {}", mod->Manifest().name, message);
+    return static_cast<ptrdiff_t>(length);
+}
+
 } // namespace
 
 Mod::Mod(Runtime& runtime, ModManifest manifest)
@@ -26,12 +46,13 @@ Mod::Mod(Runtime& runtime, ModManifest manifest)
 
 Mod::~Mod() {
     if (m_loaded && m_hasShutdown) {
-        Call("rdr2_shutdown", m_shutdown);
+        Call(IsJavy() ? "shutdown" : "rdr2_shutdown", m_shutdown);
     }
     Reset();
 }
 
 void Mod::Reset() {
+    bindings::ReleaseOwnedResources(*this);
     m_loaded = false;
     if (m_store) {
         wasmtime_store_delete(m_store);
@@ -67,11 +88,32 @@ bool Mod::LoadEntrypoint() {
     }
     m_context = wasmtime_store_context(m_store);
     wasmtime_store_limiter(m_store, 64 * 1024 * 1024, 10'000, 1, 4, 2);
-    if (auto* error = wasmtime_context_set_fuel(m_context, FuelPerCall)) {
+    if (auto* error = wasmtime_context_set_fuel(m_context, ExecutionFuel())) {
         spdlog::error("[WASM:{}] Failed to set instantiation fuel: {}",
                       m_manifest.name, TakeError(error));
         Reset();
         return false;
+    }
+
+    if (IsJavy()) {
+        auto* wasi = wasi_config_new();
+        if (!wasi) {
+            spdlog::error("[WASM:{}] Failed to create WASI configuration",
+                          m_manifest.name);
+            Reset();
+            return false;
+        }
+        wasm_byte_vec_t stdinBytes;
+        wasm_byte_vec_new_empty(&stdinBytes);
+        wasi_config_set_stdin_bytes(wasi, &stdinBytes);
+        wasi_config_set_stdout_custom(wasi, LogJavyStdout, this, nullptr);
+        wasi_config_set_stderr_custom(wasi, LogJavyStderr, this, nullptr);
+        if (auto* error = wasmtime_context_set_wasi(m_context, wasi)) {
+            spdlog::error("[WASM:{}] Failed to configure WASI: {}",
+                          m_manifest.name, TakeError(error));
+            Reset();
+            return false;
+        }
     }
 
     wasmtime_module_t* module = nullptr;
@@ -92,6 +134,13 @@ bool Mod::LoadEntrypoint() {
     }
 
     bool bindingsReady = bindings::DefineAll(*this, linker);
+    if (bindingsReady && IsJavy()) {
+        if (auto* error = wasmtime_linker_define_wasi(linker)) {
+            spdlog::error("[WASM:{}] Failed to define WASI imports: {}",
+                          m_manifest.name, TakeError(error));
+            bindingsReady = false;
+        }
+    }
     wasm_trap_t* trap = nullptr;
     wasmtime_error_t* error = nullptr;
     if (bindingsReady) {
@@ -119,15 +168,25 @@ bool Mod::LoadEntrypoint() {
     }
 
     bool found = false;
-    if (!FindFunction("rdr2_abi_version", true, m_abiVersion, found) ||
-        !FindFunction("rdr2_init", true, m_init, found) ||
-        !FindFunction("rdr2_tick", false, m_tick, m_hasTick) ||
-        !FindFunction("rdr2_key_down", false, m_keyDown, m_hasKeyDown) ||
-        !FindFunction("rdr2_key_up", false, m_keyUp, m_hasKeyUp) ||
-        !FindFunction("rdr2_shutdown", false, m_shutdown, m_hasShutdown) ||
-        !CheckAbiVersion() || !Call("rdr2_init", m_init)) {
-        Reset();
-        return false;
+    if (IsJavy()) {
+        if (!FindFunction("init", true, m_init, found) ||
+            !FindFunction("tick", false, m_tick, m_hasTick) ||
+            !FindFunction("shutdown", false, m_shutdown, m_hasShutdown) ||
+            !Call("init", m_init)) {
+            Reset();
+            return false;
+        }
+    } else {
+        if (!FindFunction("rdr2_abi_version", true, m_abiVersion, found) ||
+            !FindFunction("rdr2_init", true, m_init, found) ||
+            !FindFunction("rdr2_tick", false, m_tick, m_hasTick) ||
+            !FindFunction("rdr2_key_down", false, m_keyDown, m_hasKeyDown) ||
+            !FindFunction("rdr2_key_up", false, m_keyUp, m_hasKeyUp) ||
+            !FindFunction("rdr2_shutdown", false, m_shutdown, m_hasShutdown) ||
+            !CheckAbiVersion() || !Call("rdr2_init", m_init)) {
+            Reset();
+            return false;
+        }
     }
 
     m_loaded = true;
@@ -159,7 +218,7 @@ bool Mod::FindFunction(const char* name, bool required, wasmtime_func_t& out,
 bool Mod::Call(const char* name, const wasmtime_func_t& function,
                const wasmtime_val_t* args, size_t argCount,
                wasmtime_val_t* results, size_t resultCount) {
-    if (auto* error = wasmtime_context_set_fuel(m_context, FuelPerCall)) {
+    if (auto* error = wasmtime_context_set_fuel(m_context, ExecutionFuel())) {
         spdlog::error("[WASM:{}] Failed to set execution fuel: {}",
                       m_manifest.name, TakeError(error));
         return false;
@@ -195,8 +254,15 @@ bool Mod::CheckAbiVersion() {
     return true;
 }
 
-void Mod::Tick() {
-    if (m_loaded && m_hasTick) Call("rdr2_tick", m_tick);
+bool Mod::Tick() {
+    if (!m_loaded) return false;
+    if (!m_hasTick) return true;
+    if (Call(IsJavy() ? "tick" : "rdr2_tick", m_tick)) return true;
+
+    // A trapped Wasm function cannot be resumed reliably. Disable only the
+    // failing tick callback so the mod can still receive shutdown handling.
+    m_hasTick = false;
+    return false;
 }
 
 void Mod::OnKeyDown(uint32_t key) {

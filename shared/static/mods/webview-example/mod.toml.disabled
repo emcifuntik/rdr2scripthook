@@ -1,0 +1,6 @@
+[mod]
+name = "WebView2 Example"
+version = "0.1.0"
+author = "RDR2 Script Hook"
+description = "Transparent WebView2 render, input, and JSON bridge test"
+entrypoint = "main.wasm"

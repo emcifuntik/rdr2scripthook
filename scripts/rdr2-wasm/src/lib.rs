@@ -18,6 +18,7 @@ pub mod natives;
 pub mod timer;
 pub mod types;
 pub mod vk;
+pub mod webview;
 
 pub use native::{NativeArg, NativeError, NativeResult, NativeString};
 pub use types::*;

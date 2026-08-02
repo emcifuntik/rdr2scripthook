@@ -1,0 +1,7 @@
+[mod]
+name = "Javy WASM Trainer"
+version = "1.0.0"
+author = "RDR2 ScriptHook"
+description = "JavaScript trainer compiled to WebAssembly with Javy"
+entrypoint = "main.wasm"
+runtime = "javy"

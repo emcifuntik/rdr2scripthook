@@ -7,10 +7,33 @@
 #include <unordered_map>
 
 #include "CSingleton.h"
+#include "GtaThread.h"
+#include "rage/CSysAllocator.h"
+#include "scriptHandlerMgr.h"
 
 class CScriptManager: public CSingleton<CScriptManager>
 {
+public:
+	class WasmScriptThread final : public GtaThread
+	{
+	public:
+		void Execute() override;
+
+		void* operator new(size_t size)
+		{
+			return CSysAllocator::Instance().Alloc(size);
+		}
+
+		void operator delete(void* memory)
+		{
+			CSysAllocator::Instance().Dealloc(memory);
+		}
+	};
+
 private:
+	rage::scriptHandlerMgr* scriptHandlerManager = nullptr;
+	rage::scrThread** currentScriptThread = nullptr;
+	WasmScriptThread* wasmThread = nullptr;
 	WNDPROC pWndProc = nullptr;
 	std::unordered_map<uint64_t, uint64_t> crossMap;
 	bool* isInSession = nullptr;
@@ -25,6 +48,13 @@ private:
 public:
 	bool scriptCanBeStarted = false;
 
+	rage::scrThread* GetActiveThread() const;
+	void SetActiveThread(rage::scrThread* thread);
+	rage::scriptHandlerMgr* GetScriptHandlerManager() const
+	{
+		return scriptHandlerManager;
+	}
+
 	void SetClientPath(std::wstring path) { wClientPath = path; }
 
 	void Init();
@@ -33,6 +63,7 @@ public:
 	uintptr_t GetNativeAddress(uint64_t hash);
 
 	void HookWinApi();
+	bool UpdateGtaScript(GtaThread* thread, int operationCount);
 	bool UpdateSingleScripts(void* collection);
 	void LoadWasmMods();
 	void UpdateWasmMods();
@@ -45,4 +76,9 @@ public:
 	bool PopKeyEvent(uint32_t& key, bool& down);
 
 	void* GetGlobalPointer(uint32_t globalId);
+
+private:
+	bool StartWasmThread();
+	bool RegisterThread(GtaThread* thread);
+	uint32_t GetNextScriptId();
 };

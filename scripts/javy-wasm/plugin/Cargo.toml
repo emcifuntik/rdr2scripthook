@@ -1,0 +1,19 @@
+[package]
+name = "rdr2-javy-plugin"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+anyhow = "1.0"
+javy = "=6.0.0"
+serde_json = "1.0"
+
+[profile.release]
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

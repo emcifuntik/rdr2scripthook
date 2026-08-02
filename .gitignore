@@ -1,5 +1,27 @@
-BUILD
-BIN
-LIB
-scripts/example-wasm/target/
-scripts/rdr2-wasm/target/
+# Build output
+/BUILD/
+/BIN/
+/LIB/
+**/target/
+
+# Local CMake and IDE state
+/CMakeUserPresets.json
+/.vs/
+/.vscode/
+/.idea/
+*.suo
+*.user
+
+# Runtime and compiler diagnostics
+*.dmp
+*.ilk
+*.log
+*.pdb
+
+# Tool caches
+**/__pycache__/
+/.pytest_cache/
+
+# OS metadata
+.DS_Store
+Thumbs.db

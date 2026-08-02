@@ -14,6 +14,7 @@ struct ModManifest {
     std::string author;
     std::string description;
     std::string entrypoint;
+    std::string runtime = "wasmtime";
     std::filesystem::path modPath;
 
     bool IsValid() const { return !name.empty() && !entrypoint.empty(); }
@@ -29,7 +30,7 @@ public:
 
     bool LoadEntrypoint();
 
-    void Tick();
+    bool Tick();
     void OnKeyDown(uint32_t key);
     void OnKeyUp(uint32_t key);
 
@@ -47,6 +48,12 @@ private:
 
     static constexpr uint32_t AbiVersion = 1;
     static constexpr uint64_t FuelPerCall = 10'000'000;
+    static constexpr uint64_t JavyFuelPerCall = 100'000'000;
+
+    bool IsJavy() const noexcept { return m_manifest.runtime == "javy"; }
+    uint64_t ExecutionFuel() const noexcept {
+        return IsJavy() ? JavyFuelPerCall : FuelPerCall;
+    }
 
     Runtime& m_runtime;
     ModManifest m_manifest;

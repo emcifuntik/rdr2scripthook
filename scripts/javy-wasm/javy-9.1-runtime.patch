@@ -1,0 +1,187 @@
+diff --git a/crates/codegen/src/lib.rs b/crates/codegen/src/lib.rs
+index 2e7b063..616ea36 100644
+--- a/crates/codegen/src/lib.rs
++++ b/crates/codegen/src/lib.rs
+@@ -73,8 +73,6 @@
+ //!   unstable API's exposed by this future may break in the future without
+ //!   notice.
+ 
+-use std::fs;
+-
+ pub(crate) mod bytecode;
+ pub(crate) mod exports;
+ pub(crate) mod transform;
+@@ -90,9 +88,10 @@ pub use crate::wit::WitOptions;
+ 
+ use transform::SourceCodeSection;
+ use walrus::{
+-    DataId, DataKind, ExportItem, FunctionBuilder, FunctionId, LocalId, MemoryId, Module, ValType,
++    ConstExpr, DataId, DataKind, ExportItem, FunctionBuilder, FunctionId, MemoryId, Module,
++    ValType,
+ };
+-use wasm_opt::{OptimizationOptions, ShrinkLevel};
++use walrus::ir::{UnaryOp, Value};
+ use wasmtime::{Engine, Linker, Store};
+ use wasmtime_wasi::{WasiCtxBuilder, p2::pipe::MemoryInputPipe};
+ 
+@@ -144,18 +143,13 @@ impl Identifiers {
+ // This is an internal detail of this module.
+ #[derive(Debug)]
+ pub(crate) struct BytecodeMetadata {
+-    ptr: LocalId,
+     len: i32,
+     data_section: DataId,
+ }
+ 
+ impl BytecodeMetadata {
+-    fn new(ptr: LocalId, len: i32, data_section: DataId) -> Self {
+-        Self {
+-            ptr,
+-            len,
+-            data_section,
+-        }
++    fn new(len: i32, data_section: DataId) -> Self {
++        Self { len, data_section }
+     }
+ }
+ 
+@@ -361,11 +355,7 @@ impl Generator {
+         let main = main.finish(vec![], &mut module.funcs);
+ 
+         module.exports.add("_start", main);
+-        Ok(BytecodeMetadata::new(
+-            bytecode_ptr_local,
+-            bytecode_len,
+-            bytecode_data,
+-        ))
++        Ok(BytecodeMetadata::new(bytecode_len, bytecode_data))
+     }
+ 
+     /// Generate function exports.
+@@ -376,43 +366,63 @@ impl Generator {
+         bc_metadata: &BytecodeMetadata,
+     ) -> Result<()> {
+         if !self.function_exports.is_empty() {
+-            let fn_name_ptr_local = module.locals.add(ValType::I32);
++            let bytecode_pointer = module.globals.add_local(
++                ValType::I32,
++                true,
++                false,
++                ConstExpr::Value(Value::I32(0)),
++            );
+             for export in &self.function_exports {
+                 // For each JS function export, add an export that copies the name of the function into memory and invokes it.
+                 let js_export_bytes = export.js.as_bytes();
+                 let js_export_len: i32 = js_export_bytes.len().try_into().unwrap();
+                 let fn_name_data = module.data.add(DataKind::Passive, js_export_bytes.to_vec());
++                let function_pointer = module.globals.add_local(
++                    ValType::I32,
++                    true,
++                    false,
++                    ConstExpr::Value(Value::I32(0)),
++                );
+ 
+                 let mut export_fn = FunctionBuilder::new(&mut module.types, &[], &[]);
+-                export_fn
+-                    .func_body()
+-                    // Copy bytecode.
+-                    .i32_const(0) // orig ptr
+-                    .i32_const(0) // orig len
+-                    .i32_const(1) // alignment
+-                    .i32_const(bc_metadata.len) // size to copy
+-                    .call(identifiers.cabi_realloc)
+-                    .local_tee(bc_metadata.ptr)
+-                    .i32_const(0) // offset into data segment
+-                    .i32_const(bc_metadata.len) // size to copy
+-                    .memory_init(identifiers.memory, bc_metadata.data_section) // copy bytecode into allocated memory
+-                    .data_drop(bc_metadata.data_section)
+-                    // Copy function name.
+-                    .i32_const(0) // orig ptr
+-                    .i32_const(0) // orig len
+-                    .i32_const(1) // alignment
+-                    .i32_const(js_export_len) // new size
+-                    .call(identifiers.cabi_realloc)
+-                    .local_tee(fn_name_ptr_local)
+-                    .i32_const(0) // offset into data segment
+-                    .i32_const(js_export_len) // size to copy
+-                    .memory_init(identifiers.memory, fn_name_data) // copy fn name into allocated memory
+-                    .data_drop(fn_name_data)
+-                    // Call invoke.
+-                    .local_get(bc_metadata.ptr)
++                let mut body = export_fn.func_body();
++                body.global_get(bytecode_pointer).unop(UnaryOp::I32Eqz).if_else(
++                    None,
++                    |then| {
++                        then.i32_const(0)
++                            .i32_const(0)
++                            .i32_const(1)
++                            .i32_const(bc_metadata.len)
++                            .call(identifiers.cabi_realloc)
++                            .global_set(bytecode_pointer)
++                            .global_get(bytecode_pointer)
++                            .i32_const(0)
++                            .i32_const(bc_metadata.len)
++                            .memory_init(identifiers.memory, bc_metadata.data_section);
++                    },
++                    |_| {},
++                );
++                body.global_get(function_pointer).unop(UnaryOp::I32Eqz).if_else(
++                    None,
++                    |then| {
++                        then.i32_const(0)
++                            .i32_const(0)
++                            .i32_const(1)
++                            .i32_const(js_export_len)
++                            .call(identifiers.cabi_realloc)
++                            .global_set(function_pointer)
++                            .global_get(function_pointer)
++                            .i32_const(0)
++                            .i32_const(js_export_len)
++                            .memory_init(identifiers.memory, fn_name_data)
++                            .data_drop(fn_name_data);
++                    },
++                    |_| {},
++                );
++                body.global_get(bytecode_pointer)
+                     .i32_const(bc_metadata.len)
+                     .i32_const(1) // set function name option discriminator to some
+-                    .local_get(fn_name_ptr_local)
++                    .global_get(function_pointer)
+                     .i32_const(js_export_len)
+                     .call(identifiers.invoke);
+                 let export_fn = export_fn.finish(vec![], &mut module.funcs);
+@@ -430,18 +440,10 @@ impl Generator {
+                 module.exports.remove("invoke")?;
+                 module.exports.remove("compile-src")?;
+ 
+-                // Run wasm-opt to optimize.
+-                let tempdir = tempfile::tempdir()?;
+-                let tempfile_path = tempdir.path().join("temp.wasm");
+-
+-                module.emit_wasm_file(&tempfile_path)?;
+-
+-                OptimizationOptions::new_opt_level_3() // Aggressively optimize for speed.
+-                    .shrink_level(ShrinkLevel::Level0) // Don't optimize for size at the expense of performance.
+-                    .debug_info(false)
+-                    .run(&tempfile_path, &tempfile_path)?;
+-
+-                Ok(fs::read(&tempfile_path)?)
++                // Binaryen 116 incorrectly coalesces reusable passive data
++                // segments when a module has several WIT exports. Preserve
++                // the composed module until upstream moves to a fixed build.
++                Ok(module.emit_wasm())
+             }
+             LinkingKind::Dynamic => Ok(module.emit_wasm()),
+         }
+diff --git a/crates/plugin-processing/src/lib.rs b/crates/plugin-processing/src/lib.rs
+index 2dbad22..21e4ca2 100644
+--- a/crates/plugin-processing/src/lib.rs
++++ b/crates/plugin-processing/src/lib.rs
+@@ -136,6 +136,7 @@ fn optimize_module(wasm_bytes: &[u8]) -> Result<Vec<u8>> {
+     fs::write(&infile, wasm_bytes)?;
+     let outfile = temp_dir.path().join("outfile.wasm");
+     wasm_opt::OptimizationOptions::new_opt_level_3() // Aggressively optimize for speed.
++        .all_features()
+         .shrink_level(wasm_opt::ShrinkLevel::Level0) // Don't optimize for size at the expense of performance.
+         .debug_info(false)
+         .run(&infile, &outfile)?;

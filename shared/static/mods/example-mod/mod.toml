@@ -1,8 +1,8 @@
-# Example Rust WebAssembly mod for RDR2 Script Hook.
+# Rust WebAssembly trainer for RDR2 Script Hook.
 
 [mod]
-name = "Example Rust WASM Mod"
-version = "1.0.0"
+name = "Rust WASM Trainer"
+version = "2.0.0"
 author = "RDR2 Script Hook"
-description = "A simple example mod demonstrating the Rust WebAssembly API"
+description = "WebView-powered trainer implemented as a sandboxed Rust WebAssembly mod"
 entrypoint = "main.wasm"

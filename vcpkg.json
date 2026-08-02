@@ -6,6 +6,8 @@
     "minhook",
     "toml11",
     "spdlog",
-    "wasmtime"
+    "wasmtime",
+    "webview2",
+    "vulkan-headers"
   ]
 }
