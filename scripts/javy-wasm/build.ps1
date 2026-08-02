@@ -11,7 +11,9 @@ $ScriptRoot = $PSScriptRoot
 $RepositoryRoot = (Resolve-Path (Join-Path $ScriptRoot "..\..")).Path
 $BuildRoot = Join-Path $RepositoryRoot "BUILD\Javy"
 $JavySource = Join-Path $RepositoryRoot "BUILD\javy-src"
-$JavyExecutable = Join-Path $JavySource "target\release\javy.exe"
+$JavyTargetRoot = Join-Path $JavySource "target"
+$JavyExecutable = Join-Path $JavyTargetRoot "release\javy.exe"
+$JavyDefaultPlugin = Join-Path $JavyTargetRoot "$WasmTarget\release\plugin.wasm"
 $JavyPatch = Join-Path $ScriptRoot "javy-9.1-runtime.patch"
 $PluginManifest = Join-Path $ScriptRoot "plugin\Cargo.toml"
 $PluginTargetRoot = if ($env:CARGO_TARGET_DIR) {
@@ -67,16 +69,51 @@ if ($PatchCanApply) {
     }
 }
 
-if ($RebuildJavy -or $PatchApplied -or -not (Test-Path $JavyExecutable)) {
-    Write-Host "Building the pinned Javy v$JavyVersion compiler..."
-    & cargo build --manifest-path (Join-Path $JavySource "Cargo.toml") --release --locked --bin javy
-    if ($LASTEXITCODE -ne 0) { throw "Failed to build Javy v$JavyVersion" }
-}
-
 $InstalledTargets = & rustup target list --installed
 if ($InstalledTargets -notcontains $WasmTarget) {
     & rustup target add $WasmTarget
     if ($LASTEXITCODE -ne 0) { throw "Failed to install Rust target $WasmTarget" }
+}
+
+if ($RebuildJavy -or $PatchApplied -or -not (Test-Path $JavyExecutable)) {
+    # javy-cli's build.rs reads the default plugin from the workspace target
+    # directory and embeds it in the executable. Cargo does not infer that
+    # dependency, so this must be built first on a clean machine.
+    Write-Host "Building the pinned Javy v$JavyVersion default plugin..."
+    & cargo build `
+        --manifest-path (Join-Path $JavySource "Cargo.toml") `
+        --target-dir $JavyTargetRoot `
+        --release `
+        --locked `
+        --package javy-plugin `
+        --target $WasmTarget
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path $JavyDefaultPlugin)) {
+        throw "Failed to build the Javy v$JavyVersion default plugin"
+    }
+
+    Write-Host "Building the pinned Javy v$JavyVersion compiler..."
+    $PreviousReleaseLto = $env:CARGO_PROFILE_RELEASE_LTO
+    $JavyBuildExitCode = 0
+    try {
+        # This matches upstream's CLI target and avoids spending several
+        # minutes applying LTO to a compiler that is not part of the runtime.
+        $env:CARGO_PROFILE_RELEASE_LTO = "off"
+        & cargo build `
+            --manifest-path (Join-Path $JavySource "Cargo.toml") `
+            --target-dir $JavyTargetRoot `
+            --release `
+            --locked `
+            --package javy-cli `
+            --bin javy
+        $JavyBuildExitCode = $LASTEXITCODE
+    } finally {
+        if ($null -eq $PreviousReleaseLto) {
+            Remove-Item Env:CARGO_PROFILE_RELEASE_LTO -ErrorAction SilentlyContinue
+        } else {
+            $env:CARGO_PROFILE_RELEASE_LTO = $PreviousReleaseLto
+        }
+    }
+    if ($JavyBuildExitCode -ne 0) { throw "Failed to build Javy v$JavyVersion" }
 }
 
 Write-Host "Building the RDR2 Javy host plugin..."

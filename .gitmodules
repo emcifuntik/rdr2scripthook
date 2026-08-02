@@ -3,4 +3,4 @@
 	url = https://github.com/microsoft/vcpkg.git
 [submodule "nativedb"]
 	path = nativedb
-	url = git@github.com:alloc8or/rdr3-nativedb-data.git
+	url = https://github.com/alloc8or/rdr3-nativedb-data.git
