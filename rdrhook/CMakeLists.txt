@@ -50,6 +50,9 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(wasmtime CONFIG REQUIRED)
 find_package(unofficial-webview2 CONFIG REQUIRED)
 find_package(VulkanHeaders CONFIG REQUIRED)
+find_path(JITASM_INCLUDE_DIR jitasm.h REQUIRED)
+
+target_include_directories(${PROJECT_NAME} PRIVATE ${JITASM_INCLUDE_DIR})
 
 target_link_libraries(${PROJECT_NAME} PRIVATE
   minhook::minhook
@@ -75,6 +78,13 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   NOMINMAX
   WIN32_LEAN_AND_MEAN
   $<$<CONFIG:Debug>:_DEBUG>
+)
+
+# jitasm intentionally uses x86 mnemonic names such as `and`. Clang treats
+# alternative operator spellings as keywords unless this compatibility mode is
+# disabled (MSVC, jitasm's primary Windows compiler, already accepts them).
+target_compile_options(${PROJECT_NAME} PRIVATE
+  $<$<CXX_COMPILER_ID:Clang>:-Xclang -fno-operator-names>
 )
 
 # Target properties

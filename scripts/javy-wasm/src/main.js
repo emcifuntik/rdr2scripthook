@@ -39,6 +39,7 @@ const PLAYER_MODEL_CHANGE_GLOBAL = 1835009;
 const VISIBLE_ROWS = 11;
 const MODEL_LOAD_TIMEOUT_TICKS = 900;
 const STATUS_LIFETIME_TICKS = 300;
+let toggleBinding = 0;
 
 function hash64(value) {
     const compact = value.replace(/^0x/, "").replace(/_/g, "").padStart(16, "0");
@@ -489,7 +490,21 @@ function handleKey(key) {
 }
 
 function pollKeys() {
-    const keys = [VK.F4, VK.UP, VK.DOWN, VK.PRIOR, VK.NEXT, VK.LEFT, VK.BACK, VK.RIGHT, VK.RETURN, VK.ESCAPE];
+    if (toggleBinding > 0) {
+        for (let index = 0; index < 32; ++index) {
+            const event = RDR2Host.pollBindingEvent(toggleBinding);
+            if (event === 0) break;
+            if (event < 0) {
+                logError(`Javy trainer binding poll failed: ${event}`);
+                break;
+            }
+            if (event === 1) handleKey(VK.F4);
+        }
+    } else if (RDR2Host.isKeyJustPressed(VK.F4)) {
+        handleKey(VK.F4);
+    }
+
+    const keys = [VK.UP, VK.DOWN, VK.PRIOR, VK.NEXT, VK.LEFT, VK.BACK, VK.RIGHT, VK.RETURN, VK.ESCAPE];
     for (const key of keys) {
         if (RDR2Host.isKeyJustPressed(key)) handleKey(key);
     }
@@ -570,8 +585,18 @@ function drawMenu() {
 
 function initializeTrainer() {
     RDR2Host.globalSetInt(PLAYER_MODEL_CHANGE_GLOBAL, 1);
+    toggleBinding = RDR2Host.registerBinding(
+        "toggle_javy_trainer",
+        "Open/close JavaScript trainer",
+        "keyboard",
+        "F4",
+    );
     logInfo(`Javy trainer initialized: ${RDR2Host.metadata(0)}`);
-    logInfo("Press F4 to open the JavaScript trainer menu");
+    if (toggleBinding > 0) {
+        logInfo(`Javy trainer input binding: ${RDR2Host.bindingParameter(toggleBinding)}`);
+    } else {
+        logError(`Could not register Javy trainer input binding: ${toggleBinding}`);
+    }
     logInfo("Navigate with arrows or Page Up/Down; select with Right/Enter");
 }
 
@@ -598,6 +623,10 @@ function tickTrainer() {
 }
 
 function shutdownTrainer() {
+    if (toggleBinding > 0) {
+        RDR2Host.unregisterBinding(toggleBinding);
+        toggleBinding = 0;
+    }
     logInfo("Javy trainer shutting down");
 }
 

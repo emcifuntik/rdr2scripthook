@@ -14,10 +14,10 @@ fn initialize() {
     let tick_id = event::add_tick_callback(trainer::tick);
     let key_down_id = event::add_key_down_callback(trainer::key_down);
 
-    log::info("Press F3 to open the WebView trainer");
-    log::info("Use the mouse, search, or arrow keys; press Escape/F3 to close");
+    log::info("Use the configured trainer binding to open the WebView trainer");
+    log::info("Use the mouse, search, or arrow keys; press Escape or the binding to close");
     log::info(format!(
-        "Trainer loaded; tick callback id={tick_id}, key-down id={key_down_id}"
+        "Trainer loaded; tick callback id={tick_id}, compatibility key-down id={key_down_id}"
     ));
 }
 

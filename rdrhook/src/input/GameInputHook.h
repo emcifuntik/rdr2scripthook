@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <span>
 
 namespace rdr2::input {
 
@@ -15,6 +16,12 @@ public:
     static std::uint32_t AcquireCursorVisibility();
     static std::uint32_t ReleaseCursorVisibility();
     static std::uint32_t CursorVisibilityRequests();
+
+    // Copies the keyboard snapshot most recently published by rage::ioInput.
+    // Returns false on unsupported game builds so callers can retain a
+    // version-tolerant fallback.
+    static bool CopyKeyboardState(
+        std::span<std::uint8_t, 256> destination);
 };
 
 } // namespace rdr2::input

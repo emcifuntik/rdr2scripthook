@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "dependencies": [
     "minhook",
+    "jitasm",
     "toml11",
     "spdlog",
     "wasmtime",

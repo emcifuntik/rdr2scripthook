@@ -3,6 +3,7 @@
 #include "Logger.h"
 #include "Mod.h"
 #include "Runtime.h"
+#include "input/InputBindingManager.h"
 #ifndef RDR2_WASM_TEST
 #include "input/GameInputHook.h"
 #include "webview/WebViewOverlay.h"
@@ -11,6 +12,7 @@
 #include <Windows.h>
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cctype>
 #include <cstdint>
@@ -36,6 +38,7 @@ constexpr size_t MaxGuestString = 1024 * 1024;
 
 uint8_t g_keyStates[256]{};
 uint8_t g_previousKeyStates[256]{};
+std::array<std::uint8_t, 256> g_rageKeyStates{};
 #ifndef RDR2_WASM_TEST
 std::optional<std::string> g_pendingWebViewMessage;
 std::mutex g_cursorOwnerMutex;
@@ -592,12 +595,155 @@ wasm_trap_t* HostIsKeyJustPressed(void*, wasmtime_caller_t*,
     return nullptr;
 }
 
-#ifndef RDR2_WASM_TEST
 void SetI32Result(wasmtime_val_t* results, int32_t value) {
     results[0].kind = WASMTIME_I32;
     results[0].of.i32 = value;
 }
 
+std::string BindingOwnerName(const Mod& mod) {
+    std::string directory = mod.Manifest().modPath.filename().string();
+    if (directory.empty()) directory = mod.Manifest().name;
+    return directory + "/" + mod.Manifest().name;
+}
+
+wasm_trap_t* HostInputRegisterBinding(
+    void* environment, wasmtime_caller_t* caller,
+    const wasmtime_val_t* args, size_t, wasmtime_val_t* results, size_t) {
+    bool idValid = false;
+    bool descriptionValid = false;
+    bool mapperValid = false;
+    bool parameterValid = false;
+    const auto id = GuestString(caller, args[0].of.i32, args[1].of.i32,
+                                idValid);
+    const auto description = GuestString(caller, args[2].of.i32,
+                                         args[3].of.i32, descriptionValid);
+    const auto mapper = GuestString(caller, args[4].of.i32, args[5].of.i32,
+                                    mapperValid);
+    const auto parameter = GuestString(caller, args[6].of.i32,
+                                       args[7].of.i32, parameterValid);
+    if (!idValid || !descriptionValid || !mapperValid || !parameterValid) {
+        SetI32Result(results, static_cast<int32_t>(
+            rdr2::input::BindingStatus::InvalidArgument));
+        return nullptr;
+    }
+
+    auto& mod = *static_cast<Mod*>(environment);
+    const auto registration = rdr2::input::InputBindingManager::Instance()
+        .Register(&mod, BindingOwnerName(mod), std::string(id),
+                  std::string(description), std::string(mapper),
+                  std::string(parameter));
+    if (registration.status == rdr2::input::BindingStatus::Ok ||
+        registration.status == rdr2::input::BindingStatus::AlreadyRegistered) {
+        SetI32Result(results, registration.handle);
+    } else {
+        SetI32Result(results, static_cast<int32_t>(registration.status));
+    }
+    return nullptr;
+}
+
+wasm_trap_t* HostInputUnregisterBinding(
+    void* environment, wasmtime_caller_t*, const wasmtime_val_t* args, size_t,
+    wasmtime_val_t* results, size_t) {
+    const auto status = rdr2::input::InputBindingManager::Instance().Unregister(
+        environment, args[0].of.i32);
+    SetI32Result(results, static_cast<int32_t>(status));
+    return nullptr;
+}
+
+wasm_trap_t* HostInputPollBindingEvent(
+    void* environment, wasmtime_caller_t*, const wasmtime_val_t* args, size_t,
+    wasmtime_val_t* results, size_t) {
+    auto& manager = rdr2::input::InputBindingManager::Instance();
+    std::string mapper;
+    std::string parameter;
+    const auto status = manager.GetMapping(environment, args[0].of.i32,
+                                           mapper, parameter);
+    if (status != rdr2::input::BindingStatus::Ok) {
+        SetI32Result(results, static_cast<int32_t>(status));
+    } else {
+        SetI32Result(results, static_cast<int32_t>(
+            manager.PollEvent(environment, args[0].of.i32)));
+    }
+    return nullptr;
+}
+
+wasm_trap_t* HostInputIsBindingDown(
+    void* environment, wasmtime_caller_t*, const wasmtime_val_t* args, size_t,
+    wasmtime_val_t* results, size_t) {
+    SetI32Result(results,
+        rdr2::input::InputBindingManager::Instance().IsDown(
+            environment, args[0].of.i32));
+    return nullptr;
+}
+
+wasm_trap_t* HostInputGetBindingParameter(
+    void* environment, wasmtime_caller_t* caller,
+    const wasmtime_val_t* args, size_t, wasmtime_val_t* results, size_t) {
+    std::string mapper;
+    std::string parameter;
+    const auto status = rdr2::input::InputBindingManager::Instance().GetMapping(
+        environment, args[0].of.i32, mapper, parameter);
+    if (status != rdr2::input::BindingStatus::Ok) {
+        SetI32Result(results, static_cast<int32_t>(status));
+        return nullptr;
+    }
+
+    const int32_t capacity = args[2].of.i32;
+    if (capacity < 0) {
+        SetI32Result(results, static_cast<int32_t>(
+            rdr2::input::BindingStatus::InvalidArgument));
+        return nullptr;
+    }
+    if (capacity > 0) {
+        GuestMemory memory;
+        uint8_t* destination = nullptr;
+        if (!GetGuestMemory(caller, memory) ||
+            !memory.Range(args[1].of.i32, static_cast<size_t>(capacity),
+                          destination)) {
+            SetI32Result(results, static_cast<int32_t>(
+                rdr2::input::BindingStatus::InvalidArgument));
+            return nullptr;
+        }
+        const size_t length = std::min(
+            parameter.size(), static_cast<size_t>(capacity - 1));
+        std::memcpy(destination, parameter.data(), length);
+        destination[length] = 0;
+    }
+    SetI32Result(results, static_cast<int32_t>(parameter.size()));
+    return nullptr;
+}
+
+wasm_trap_t* HostInputSetBinding(
+    void* environment, wasmtime_caller_t* caller,
+    const wasmtime_val_t* args, size_t, wasmtime_val_t* results, size_t) {
+    bool mapperValid = false;
+    bool parameterValid = false;
+    const auto mapper = GuestString(caller, args[1].of.i32, args[2].of.i32,
+                                    mapperValid);
+    const auto parameter = GuestString(caller, args[3].of.i32,
+                                       args[4].of.i32, parameterValid);
+    if (!mapperValid || !parameterValid) {
+        SetI32Result(results, static_cast<int32_t>(
+            rdr2::input::BindingStatus::InvalidArgument));
+        return nullptr;
+    }
+    const auto status = rdr2::input::InputBindingManager::Instance().SetMapping(
+        environment, args[0].of.i32, std::string(mapper),
+        std::string(parameter));
+    SetI32Result(results, static_cast<int32_t>(status));
+    return nullptr;
+}
+
+wasm_trap_t* HostInputResetBinding(
+    void* environment, wasmtime_caller_t*, const wasmtime_val_t* args, size_t,
+    wasmtime_val_t* results, size_t) {
+    const auto status = rdr2::input::InputBindingManager::Instance().ResetMapping(
+        environment, args[0].of.i32);
+    SetI32Result(results, static_cast<int32_t>(status));
+    return nullptr;
+}
+
+#ifndef RDR2_WASM_TEST
 std::uint32_t CursorReferencesOwnedBy(Mod& mod) {
     std::lock_guard lock(g_cursorOwnerMutex);
     const auto owner = g_cursorOwners.find(&mod);
@@ -1017,6 +1163,24 @@ bool DefineAll(Mod& mod, wasmtime_linker_t* linker) {
     valid &= Define(linker, mod, "game_time", {}, { WASM_I32 }, HostGameTime);
     valid &= Define(linker, mod, "is_key_pressed", { WASM_I32 }, { WASM_I32 }, HostIsKeyPressed);
     valid &= Define(linker, mod, "is_key_just_pressed", { WASM_I32 }, { WASM_I32 }, HostIsKeyJustPressed);
+    valid &= Define(linker, mod, "input_register_binding",
+                    { WASM_I32, WASM_I32, WASM_I32, WASM_I32,
+                      WASM_I32, WASM_I32, WASM_I32, WASM_I32 },
+                    { WASM_I32 }, HostInputRegisterBinding);
+    valid &= Define(linker, mod, "input_unregister_binding", { WASM_I32 },
+                    { WASM_I32 }, HostInputUnregisterBinding);
+    valid &= Define(linker, mod, "input_poll_binding_event", { WASM_I32 },
+                    { WASM_I32 }, HostInputPollBindingEvent);
+    valid &= Define(linker, mod, "input_is_binding_down", { WASM_I32 },
+                    { WASM_I32 }, HostInputIsBindingDown);
+    valid &= Define(linker, mod, "input_get_binding_parameter",
+                    { WASM_I32, WASM_I32, WASM_I32 }, { WASM_I32 },
+                    HostInputGetBindingParameter);
+    valid &= Define(linker, mod, "input_set_binding",
+                    { WASM_I32, WASM_I32, WASM_I32, WASM_I32, WASM_I32 },
+                    { WASM_I32 }, HostInputSetBinding);
+    valid &= Define(linker, mod, "input_reset_binding", { WASM_I32 },
+                    { WASM_I32 }, HostInputResetBinding);
 #ifndef RDR2_WASM_TEST
     valid &= Define(linker, mod, "webview_open",
                     { WASM_I32, WASM_I32, WASM_I32, WASM_I32 },
@@ -1086,6 +1250,7 @@ bool DefineAll(Mod& mod, wasmtime_linker_t* linker) {
 }
 
 void ReleaseOwnedResources(Mod& mod) {
+    rdr2::input::InputBindingManager::Instance().ReleaseOwner(&mod);
 #ifndef RDR2_WASM_TEST
     ReleaseCursorReferencesOwnedBy(mod);
     if (g_webViewOwner == &mod) {
@@ -1098,11 +1263,32 @@ void ReleaseOwnedResources(Mod& mod) {
 #endif
 }
 
+void BuildRageKeyboardStateFromVirtualKeys()
+{
+    g_rageKeyStates.fill(0);
+    for (std::uint32_t virtualKey = 0; virtualKey < 256; ++virtualKey) {
+        if (!g_keyStates[virtualKey]) continue;
+        std::uint8_t rageKey = 0;
+        if (rdr2::input::InputBindingManager::VirtualKeyToRageKey(
+                static_cast<std::uint8_t>(virtualKey), rageKey))
+            g_rageKeyStates[rageKey] = 1;
+    }
+}
+
 void PollKeyboard() {
     std::memcpy(g_previousKeyStates, g_keyStates, sizeof(g_keyStates));
-    for (int key = 0; key < 256; ++key) {
+    for (int key = 0; key < 256; ++key)
         g_keyStates[key] = (GetAsyncKeyState(key) & 0x8000) ? 1 : 0;
+#ifndef RDR2_WASM_TEST
+    std::span<std::uint8_t, 256> state(g_rageKeyStates);
+    if (!rdr2::input::GameInputHook::CopyKeyboardState(state)) {
+        BuildRageKeyboardStateFromVirtualKeys();
     }
+#else
+    BuildRageKeyboardStateFromVirtualKeys();
+#endif
+    rdr2::input::InputBindingManager::Instance().UpdateKeyboardState(
+        std::span<const std::uint8_t, 256>(g_rageKeyStates));
 }
 
 #ifdef RDR2_WASM_TEST
@@ -1110,6 +1296,9 @@ void SetKeyStateForTesting(uint32_t key, bool pressed) {
     if (key >= std::size(g_keyStates)) return;
     std::memcpy(g_previousKeyStates, g_keyStates, sizeof(g_keyStates));
     g_keyStates[key] = pressed ? 1 : 0;
+    BuildRageKeyboardStateFromVirtualKeys();
+    rdr2::input::InputBindingManager::Instance().UpdateKeyboardState(
+        std::span<const std::uint8_t, 256>(g_rageKeyStates));
 }
 #endif
 

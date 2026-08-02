@@ -6,3 +6,9 @@ version = "2.0.0"
 author = "RDR2 Script Hook"
 description = "WebView-powered trainer implemented as a sandboxed Rust WebAssembly mod"
 entrypoint = "main.wasm"
+
+[[input.bindings]]
+id = "toggle_trainer"
+description = "Open/close WebView trainer"
+mapper = "keyboard"
+default = "F3"

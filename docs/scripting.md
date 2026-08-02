@@ -13,6 +13,12 @@ author = "Author"
 description = "Example description"
 entrypoint = "main.wasm"
 runtime = "wasmtime"
+
+[[input.bindings]]
+id = "open_inventory"
+description = "Open custom inventory"
+mapper = "keyboard"
+default = "F6"
 ```
 
 The entrypoint must be a non-empty `.wasm` file in the same mod directory.
@@ -45,6 +51,7 @@ macro.
 | Module | API |
 | --- | --- |
 | `core` | Game time and current/edge keyboard queries. |
+| `input` | Persistent named bindings, Down/Up events, state and remapping. |
 | `event` | Tick, key-down and key-up callbacks. |
 | `timer` | One-shot and repeating timers driven by game time. |
 | `natives` | Generated typed wrappers for named RDR3 natives. |
@@ -59,6 +66,62 @@ macro.
 
 Generated native wrappers are `unsafe`: guest-memory isolation cannot validate
 game handles, pointer semantics, entity lifetime or native preconditions.
+
+## Input bindings
+
+Use a named binding for user-facing actions. Unlike the legacy raw key
+callbacks, the selected mapping survives restarts; bindings can be remapped and
+emit both press and release events.
+
+Bindings that must appear under `Settings -> Controls -> Script Bindings` must
+also be declared with `[[input.bindings]]` in `mod.toml`, as shown above. The
+host reads declarations before the frontend builds and caches the Controls UI;
+the script's matching runtime registration then adopts that native control.
+The directory name, `[mod].name`, binding `id`, description, mapper, and default
+key should remain stable and match the registration call.
+
+Changing either key in the game updates the running action immediately and
+persists both overrides to `input-bindings.toml`. An action is down while its
+primary or alternate key is held. Up to 2048 manifest-declared bindings can be
+shown. Bindings registered only at runtime still receive events and support SDK
+remapping, but cannot be inserted safely into an already cached Controls screen.
+The current native integration supports two keyboard mappings per action.
+
+```rust
+use rdr2_wasm::input::{self, BindingEvent};
+
+let binding = input::Binding::register_keyboard(
+    "open_inventory",
+    "Open custom inventory",
+    "F6",
+)?;
+
+while let Some(event) = binding.poll_event()? {
+    match event {
+        BindingEvent::Down => { /* open */ }
+        BindingEvent::Up => { /* key released */ }
+    }
+}
+
+binding.set_keyboard("F7")?; // persisted in input-bindings.toml
+binding.reset()?;             // restore F6
+# Ok::<(), input::Error>(())
+```
+
+`input::subscribe_keyboard` is a convenience wrapper that polls safely on each
+script tick and invokes a callback for every queued `Down`/`Up` edge. Keep the
+returned `Subscription` alive for as long as the action is needed.
+
+Keyboard parameters accept `A`-`Z`, `0`-`9`, `F1`-`F24`, navigation and
+modifier names such as `Escape`, `PageUp`, `LShift`, and numeric virtual-key
+codes such as `0xBA`. Public values are Win32-compatible, but the current RAGE
+keyboard snapshot is indexed by DirectInput scan codes; the host converts
+between them explicitly. Win32 polling is used only as a compatibility fallback
+when a future game build cannot be resolved.
+
+For Javy guests the same host contract is available as
+`RDR2Host.registerBinding`, `unregisterBinding`, `pollBindingEvent`,
+`isBindingDown`, `bindingParameter`, `setBinding`, and `resetBinding`.
 
 ## WebView example
 

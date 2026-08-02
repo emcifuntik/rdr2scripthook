@@ -1,7 +1,7 @@
 use crate::catalog::{Action, ModelPurpose, Screen};
 use crate::ui::{self, Message};
 
-use rdr2_wasm::{global, hash, log, natives, vk, webview, NativeError, Vehicle};
+use rdr2_wasm::{global, hash, input, log, natives, vk, webview, NativeError, Vehicle};
 
 use std::cell::RefCell;
 use std::collections::VecDeque;
@@ -23,6 +23,8 @@ struct Trainer {
     invincible: bool,
     status: Option<Status>,
     poll_error_reported: bool,
+    toggle_binding: Option<input::Binding>,
+    binding_error_reported: bool,
 }
 
 struct PendingModel {
@@ -75,10 +77,13 @@ impl Trainer {
             invincible: false,
             status: None,
             poll_error_reported: false,
+            toggle_binding: None,
+            binding_error_reported: false,
         }
     }
 
     fn tick(&mut self) {
+        self.poll_toggle_binding();
         self.process_model_queue();
         if self.open && !webview::is_open() {
             self.release_cursor();
@@ -92,19 +97,40 @@ impl Trainer {
     }
 
     fn key_down(&mut self, key: u32) {
-        if key == vk::F3 {
-            if self.open {
-                self.close_menu();
-            } else {
-                self.open_menu();
-            }
-            return;
-        }
-
         // WebView2 reserves F8 as a focus-release accelerator. Close the
         // trainer when that happens so focus and cursor ownership cannot drift.
         if self.open && key == vk::F8 {
             self.close_menu();
+        }
+    }
+
+    fn poll_toggle_binding(&mut self) {
+        for _ in 0..32 {
+            let event = match self.toggle_binding.as_ref() {
+                Some(binding) => binding.poll_event(),
+                None => return,
+            };
+            match event {
+                Ok(Some(input::BindingEvent::Down)) => {
+                    self.binding_error_reported = false;
+                    if self.open {
+                        self.close_menu();
+                    } else {
+                        self.open_menu();
+                    }
+                }
+                Ok(Some(input::BindingEvent::Up)) => {
+                    self.binding_error_reported = false;
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    if !self.binding_error_reported {
+                        self.binding_error_reported = true;
+                        log::error(format!("Trainer input binding failed: {error:?}"));
+                    }
+                    break;
+                }
+            }
         }
     }
 
@@ -519,7 +545,28 @@ unsafe fn player_spawn_point(distance: f32) -> Result<(f32, f32, f32, f32), Nati
 
 pub fn initialize() {
     global::set_int(PLAYER_MODEL_CHANGE_GLOBAL, 1);
-    TRAINER.with(|trainer| trainer.borrow_mut().prewarm());
+    TRAINER.with(|trainer| {
+        let mut trainer = trainer.borrow_mut();
+        match input::Binding::register_keyboard(
+            "toggle_trainer",
+            "Open/close WebView trainer",
+            "F3",
+        ) {
+            Ok(binding) => {
+                match binding.parameter() {
+                    Ok(key) => log::info(format!("Trainer input binding: {key}")),
+                    Err(error) => {
+                        log::warn(format!("Could not read trainer input binding: {error:?}"))
+                    }
+                }
+                trainer.toggle_binding = Some(binding);
+            }
+            Err(error) => log::error(format!(
+                "Could not register trainer input binding: {error:?}"
+            )),
+        }
+        trainer.prewarm();
+    });
 }
 
 pub fn tick() {

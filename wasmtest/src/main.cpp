@@ -1,11 +1,15 @@
 #include "wasm/Mod.h"
 #include "wasm/Runtime.h"
 #include "wasm/Bindings.h"
+#include "input/InputBindingManager.h"
 
 #include <cstring>
 #include <cstdint>
+#include <algorithm>
+#include <array>
 #include <filesystem>
 #include <iterator>
+#include <unordered_set>
 
 namespace {
 
@@ -144,6 +148,163 @@ int main() {
     auto& runtime = rdr2wasm::GetRuntime();
     if (!runtime.IsValid()) return 1;
 
+    auto& inputManager = rdr2::input::InputBindingManager::Instance();
+    inputManager.ResetForTesting();
+    int testOwner = 0;
+    const auto declaredBinding = inputManager.Predeclare(
+        "test/mod", "action", "Test action", "keyboard", "F6");
+    if (declaredBinding.status != rdr2::input::BindingStatus::Ok ||
+        declaredBinding.handle <= 0) return 37;
+    std::array<std::uint8_t, 256> testKeys{};
+    testKeys[0x40] = 1; // RAGE/DIK F6; ownerless declarations stay idle.
+    inputManager.UpdateKeyboardState(testKeys);
+    if (inputManager.Snapshot().size() != 1 ||
+        inputManager.Snapshot().front().down) return 38;
+    const auto testBinding = inputManager.Register(
+        &testOwner, "test/mod", "action", "Test action", "keyboard", "F6");
+    if (testBinding.status != rdr2::input::BindingStatus::Ok ||
+        testBinding.handle != declaredBinding.handle) return 19;
+    inputManager.UpdateKeyboardState(testKeys);
+    if (inputManager.IsDown(&testOwner, testBinding.handle) != 1 ||
+        inputManager.PollEvent(&testOwner, testBinding.handle) !=
+            rdr2::input::BindingEvent::Down) return 20;
+    testKeys[0x40] = 0;
+    inputManager.UpdateKeyboardState(testKeys);
+    if (inputManager.PollEvent(&testOwner, testBinding.handle) !=
+            rdr2::input::BindingEvent::Up) return 21;
+    if (inputManager.SetMapping(&testOwner, testBinding.handle,
+                                "keyboard", "F7") !=
+            rdr2::input::BindingStatus::Ok) return 22;
+    std::string mapper;
+    std::string parameter;
+    if (inputManager.GetMapping(&testOwner, testBinding.handle,
+                                mapper, parameter) !=
+            rdr2::input::BindingStatus::Ok ||
+        mapper != "keyboard" || parameter != "F7") return 23;
+    const auto nativeBindings = inputManager.Snapshot();
+    if (nativeBindings.size() != 1 ||
+        nativeBindings.front().controlId <
+            rdr2::input::InputBindingManager::NativeControlIdFirst ||
+        nativeBindings.front().controlId >
+            rdr2::input::InputBindingManager::NativeControlIdLast)
+        return 26;
+    const auto byControlId =
+        inputManager.FindByControlId(nativeBindings.front().controlId);
+    if (!byControlId || byControlId->handle != testBinding.handle) return 27;
+    if (inputManager.SetKeyboardVirtualKeyByControlId(
+            nativeBindings.front().controlId, 0x77) !=
+            rdr2::input::BindingStatus::Ok)
+        return 28;
+    if (inputManager.GetMapping(&testOwner, testBinding.handle,
+                                mapper, parameter) !=
+            rdr2::input::BindingStatus::Ok || parameter != "F8")
+        return 29;
+    if (inputManager.SetKeyboardVirtualKeyByControlId(
+            nativeBindings.front().controlId, 1, 0x78) !=
+            rdr2::input::BindingStatus::Ok)
+        return 40;
+    const auto withAlternate =
+        inputManager.FindByControlId(nativeBindings.front().controlId);
+    if (!withAlternate || !withAlternate->alternateMapped ||
+        withAlternate->alternateParameter != "F9")
+        return 41;
+    if (inputManager.SetKeyboardVirtualKeyByControlId(
+            nativeBindings.front().controlId, 0xFF000) !=
+            rdr2::input::BindingStatus::Ok ||
+        inputManager.GetMapping(&testOwner, testBinding.handle,
+                                mapper, parameter) !=
+            rdr2::input::BindingStatus::Ok || parameter != "UNBOUND")
+        return 32;
+    testKeys.fill(0);
+    testKeys[0x43] = 1; // RAGE/DIK F9; alternate mapping drives the action.
+    inputManager.UpdateKeyboardState(testKeys);
+    if (inputManager.IsDown(&testOwner, testBinding.handle) != 1 ||
+        inputManager.PollEvent(&testOwner, testBinding.handle) !=
+            rdr2::input::BindingEvent::Down)
+        return 42;
+    testKeys[0x43] = 0;
+    inputManager.UpdateKeyboardState(testKeys);
+    if (inputManager.PollEvent(&testOwner, testBinding.handle) !=
+            rdr2::input::BindingEvent::Up)
+        return 43;
+    if (inputManager.SetKeyboardVirtualKeyByControlId(
+            nativeBindings.front().controlId, 1, 0xFF000) !=
+            rdr2::input::BindingStatus::Ok)
+        return 44;
+    const auto withoutAlternate =
+        inputManager.FindByControlId(nativeBindings.front().controlId);
+    if (!withoutAlternate || withoutAlternate->alternateMapped ||
+        withoutAlternate->alternateParameter != "UNBOUND")
+        return 45;
+    testKeys[0] = 1;
+    inputManager.UpdateKeyboardState(testKeys);
+    if (inputManager.IsDown(&testOwner, testBinding.handle) != 0 ||
+        inputManager.PollEvent(&testOwner, testBinding.handle) !=
+            rdr2::input::BindingEvent::None)
+        return 33;
+
+    int capacityOwner = 0;
+    constexpr std::size_t additionalCapacity =
+        rdr2::input::InputBindingManager::NativeBindingCapacity - 1;
+    for (std::size_t index = 0; index < additionalCapacity; ++index) {
+        const auto binding = inputManager.Register(
+            &capacityOwner, "capacity/mod", "action_" + std::to_string(index),
+            "Capacity action", "keyboard", "F9");
+        if (binding.status != rdr2::input::BindingStatus::Ok) return 30;
+    }
+    const auto overCapacity = inputManager.Register(
+        &capacityOwner, "capacity/mod", "over_capacity", "Capacity action",
+        "keyboard", "F9");
+    if (overCapacity.status !=
+        rdr2::input::BindingStatus::CapacityExceeded) return 31;
+    std::unordered_set<std::uint32_t> nativeControlIds;
+    std::size_t bindingsWithoutNativeSlot = 0;
+    for (const auto& binding : inputManager.Snapshot()) {
+        if (binding.controlId == 0) {
+            ++bindingsWithoutNativeSlot;
+        } else {
+            nativeControlIds.insert(binding.controlId);
+        }
+    }
+    if (nativeControlIds.size() !=
+            rdr2::input::InputBindingManager::NativeBindingCapacity ||
+        bindingsWithoutNativeSlot != 0)
+        return 31;
+    const auto capacitySnapshot = inputManager.Snapshot();
+    const auto visibleCapacityBinding = std::find_if(
+        capacitySnapshot.begin(), capacitySnapshot.end(),
+        [](const auto& binding) {
+            return binding.owner == "capacity/mod" && binding.controlId != 0;
+        });
+    if (visibleCapacityBinding == capacitySnapshot.end()) return 34;
+    if (inputManager.Unregister(&capacityOwner,
+                                visibleCapacityBinding->handle) !=
+        rdr2::input::BindingStatus::Ok)
+        return 35;
+    nativeControlIds.clear();
+    bindingsWithoutNativeSlot = 0;
+    for (const auto& binding : inputManager.Snapshot()) {
+        if (binding.controlId == 0)
+            ++bindingsWithoutNativeSlot;
+        else
+            nativeControlIds.insert(binding.controlId);
+    }
+    if (nativeControlIds.size() !=
+            rdr2::input::InputBindingManager::NativeBindingCapacity - 1 ||
+        bindingsWithoutNativeSlot != 0)
+        return 36;
+    inputManager.ReleaseOwner(&capacityOwner);
+    if (inputManager.ResetMapping(&testOwner, testBinding.handle) !=
+            rdr2::input::BindingStatus::Ok) return 24;
+    inputManager.ReleaseOwner(&testOwner);
+    if (inputManager.Snapshot().size() != 1) return 25;
+    inputManager.ResetForTesting();
+
+    const auto rustDeclaration = inputManager.Predeclare(
+        "example-mod/WASM smoke test", "toggle_trainer",
+        "Open/close WebView trainer", "keyboard", "F3");
+    if (rustDeclaration.status != rdr2::input::BindingStatus::Ok) return 39;
+
     rdr2wasm::InstallGameBridge(GetNativeAddress, GetGlobalPointer);
     rdr2wasm::ModManifest manifest{
         .name = "WASM smoke test",
@@ -157,12 +318,21 @@ int main() {
     rdr2wasm::Mod mod(runtime, std::move(manifest));
     if (!mod.LoadEntrypoint()) return 2;
 
-    // The Rust trainer is WebView-driven. Initialization prewarms a hidden
-    // browser; F3 now toggles visibility, focus and cursor ownership without
-    // destroying it. The test host models this lifecycle without WebView2.
-    mod.OnKeyDown(0x72); // F3: show the prewarmed trainer.
+    // The trainer registers a persistent action and receives its Down/Up
+    // edges from the host binding manager.
+    const auto rustBindings =
+        rdr2::input::InputBindingManager::Instance().Snapshot();
+    if (rustBindings.size() != 1 ||
+        rustBindings.front().id != "toggle_trainer" ||
+        rustBindings.front().parameter != "F3") return 3;
+
+    rdr2wasm::bindings::SetKeyStateForTesting(0x72, true);
     if (!mod.Tick()) return 3;
-    mod.OnKeyDown(0x72); // F3: hide it while keeping the host open.
+    rdr2wasm::bindings::SetKeyStateForTesting(0x72, false);
+    if (!mod.Tick()) return 4;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x72, true);
+    if (!mod.Tick()) return 4;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x72, false);
     if (!mod.Tick()) return 4;
 
     rdr2wasm::ModManifest javyManifest{

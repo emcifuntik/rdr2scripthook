@@ -5,3 +5,9 @@ author = "RDR2 ScriptHook"
 description = "JavaScript trainer compiled to WebAssembly with Javy"
 entrypoint = "main.wasm"
 runtime = "javy"
+
+[[input.bindings]]
+id = "toggle_javy_trainer"
+description = "Open/close JavaScript trainer"
+mapper = "keyboard"
+default = "F4"

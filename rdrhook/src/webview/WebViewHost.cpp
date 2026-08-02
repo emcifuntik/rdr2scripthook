@@ -1,6 +1,7 @@
 #include "stdafx.h"
 
 #include "WebViewHost.h"
+#include "graphics/PostFrontendRenderer.h"
 
 // WebView2's generated MIDL header assumes the MSVC `interface` extension.
 // clang-cl does not provide it when windows.h is included with our lean flags.
@@ -444,6 +445,9 @@ struct WebViewHost::Impl {
         result = producerFence->CreateSharedHandle(
             nullptr, GENERIC_ALL, nullptr, &producerFenceHandle);
         if (FAILED(result)) return false;
+        producerCompletionEvent =
+            CreateEventW(nullptr, FALSE, FALSE, nullptr);
+        if (!producerCompletionEvent) return false;
 
         result = d3d11Device5->CreateFence(
             0, D3D11_FENCE_FLAG_SHARED, IID_PPV_ARGS(&consumerFence));
@@ -548,6 +552,83 @@ struct WebViewHost::Impl {
         return 60;
     }
 
+    void DisableBuiltInBrowserUi()
+    {
+        ComPtr<ICoreWebView2Settings> settings;
+        HRESULT result = webview->get_Settings(&settings);
+        if (FAILED(result) || !settings) {
+            spdlog::warn(
+                "[WebView2] Could not access browser settings: 0x{:08X}",
+                static_cast<unsigned int>(result));
+            return;
+        }
+
+        const auto apply = [](HRESULT settingResult,
+                              const char* settingName) {
+            if (FAILED(settingResult)) {
+                spdlog::warn(
+                    "[WebView2] Could not disable {}: 0x{:08X}",
+                    settingName,
+                    static_cast<unsigned int>(settingResult));
+                return false;
+            }
+            return true;
+        };
+
+        bool configured = true;
+        configured &= apply(settings->put_IsStatusBarEnabled(FALSE),
+                            "the status bar");
+        configured &= apply(settings->put_AreDevToolsEnabled(FALSE),
+                            "DevTools");
+        configured &= apply(
+            settings->put_AreDefaultContextMenusEnabled(FALSE),
+            "default context menus");
+        configured &= apply(settings->put_IsZoomControlEnabled(FALSE),
+                            "browser zoom controls");
+
+        ComPtr<ICoreWebView2Settings3> settings3;
+        result = settings.As(&settings3);
+        if (SUCCEEDED(result)) {
+            configured &= apply(
+                settings3->put_AreBrowserAcceleratorKeysEnabled(FALSE),
+                "browser accelerator keys");
+        } else {
+            configured = false;
+            spdlog::warn(
+                "[WebView2] Browser accelerator settings are unavailable: "
+                "0x{:08X}",
+                static_cast<unsigned int>(result));
+        }
+
+        ComPtr<ICoreWebView2Settings4> settings4;
+        if (SUCCEEDED(settings.As(&settings4))) {
+            configured &= apply(
+                settings4->put_IsPasswordAutosaveEnabled(FALSE),
+                "password autosave");
+            configured &= apply(
+                settings4->put_IsGeneralAutofillEnabled(FALSE),
+                "browser autofill");
+        }
+
+        ComPtr<ICoreWebView2Settings5> settings5;
+        if (SUCCEEDED(settings.As(&settings5))) {
+            configured &= apply(settings5->put_IsPinchZoomEnabled(FALSE),
+                                "pinch zoom");
+        }
+
+        ComPtr<ICoreWebView2Settings6> settings6;
+        if (SUCCEEDED(settings.As(&settings6))) {
+            configured &= apply(
+                settings6->put_IsSwipeNavigationEnabled(FALSE),
+                "swipe navigation");
+        }
+
+        if (configured) {
+            spdlog::info(
+                "[WebView2] Built-in browser UI and accelerators disabled");
+        }
+    }
+
     HRESULT OnControllerCreated(
         HRESULT status,
         ICoreWebView2CompositionController* createdCompositionController)
@@ -564,6 +645,8 @@ struct WebViewHost::Impl {
         if (FAILED(result)) return result;
         result = controller->get_CoreWebView2(&webview);
         if (FAILED(result)) return result;
+
+        DisableBuiltInBrowserUi();
 
         ComPtr<ICoreWebView2Controller2> controller2;
         if (SUCCEEDED(controller.As(&controller2))) {
@@ -720,6 +803,31 @@ struct WebViewHost::Impl {
                 return;
             }
             d3d11Context4->Flush();
+
+            // Do not publish a Vulkan frame while its D3D11 copy can still be
+            // queued behind a consumer-fence wait. Otherwise RAGE can enqueue
+            // a Vulkan producer wait ahead of the consumer signal needed to
+            // release that copy, creating a cross-API GPU deadlock after a
+            // hide/show cycle.
+            if (graphics::GetGraphicsBackend() ==
+                graphics::GraphicsBackend::Vulkan) {
+                result = producerFence->SetEventOnCompletion(
+                    signalValue, producerCompletionEvent);
+                const DWORD wait = SUCCEEDED(result)
+                    ? WaitForSingleObject(producerCompletionEvent, 2000)
+                    : WAIT_FAILED;
+                if (wait != WAIT_OBJECT_0) {
+                    if (!producerCompletionFailureLogged) {
+                        producerCompletionFailureLogged = true;
+                        spdlog::error(
+                            "[WebView2] Vulkan capture producer completion "
+                            "timed out (wait={}, HRESULT=0x{:08X})",
+                            wait, static_cast<unsigned int>(result));
+                    }
+                    return;
+                }
+                producerCompletionFailureLogged = false;
+            }
 
             auto descriptor = MakeDescriptor(entry, signalValue);
             latestFrame.store(std::move(descriptor),
@@ -942,6 +1050,10 @@ struct WebViewHost::Impl {
             CloseHandle(producerFenceHandle);
             producerFenceHandle = nullptr;
         }
+        if (producerCompletionEvent) {
+            CloseHandle(producerCompletionEvent);
+            producerCompletionEvent = nullptr;
+        }
         if (dispatcherQueueController)
             dispatcherQueueController.ShutdownQueueAsync();
         dispatcherQueueController = nullptr;
@@ -989,6 +1101,8 @@ struct WebViewHost::Impl {
     ComPtr<ID3D11Fence> consumerFence;
     HANDLE producerFenceHandle = nullptr;
     HANDLE consumerFenceHandle = nullptr;
+    HANDLE producerCompletionEvent = nullptr;
+    bool producerCompletionFailureLogged = false;
     winrt::Windows::Graphics::DirectX::Direct3D11::IDirect3DDevice
         direct3DDevice{nullptr};
 

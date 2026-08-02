@@ -19,6 +19,8 @@ JavaScript examples, generated native bindings, and a headless smoke-test host.
 - Direct3D 12 and Vulkan shared-texture synchronization.
 - Overlay visibility, focus, native game cursor control and bidirectional JSON
   messaging.
+- Persistent script-owned keyboard actions exposed in the game's Controls
+  settings, with press/release events for WASM guests.
 - Full-memory minidumps and structured runtime logging.
 
 ## Repository layout
@@ -29,13 +31,13 @@ JavaScript examples, generated native bindings, and a headless smoke-test host.
 | `launcher-hook/` | Suspends a newly created game process until injection is complete. |
 | `rdrhook/` | In-game runtime, RAGE integration, WASM host and WebView renderer. |
 | `scripts/rdr2-wasm/` | Rust guest SDK and stable ABI wrappers. |
-| `scripts/example-wasm/` | Rust WebView trainer opened with F3. |
-| `scripts/javy-wasm/` | JavaScript/Javy trainer opened with F4. |
+| `scripts/example-wasm/` | Rust WebView trainer with an F3 default binding. |
+| `scripts/javy-wasm/` | JavaScript/Javy trainer with an F4 default binding. |
 | `scripts/webview-example/` | Minimal WebView lifecycle and messaging example. |
 | `shared/static/mods/` | Mod manifests and WASM files copied into build output. |
 | `tools/codegen/` | Native-wrapper generator. |
 | `wasmtest/` | Headless ABI and example-mod smoke tests. |
-| `research/` | Reverse-engineering notes and planned engine integrations. |
+| `research/` | Reverse-engineering and engine-integration notes. |
 
 ## Quick start for developers
 
@@ -64,7 +66,7 @@ layout; use it only in environments where modding is permitted.
 - [Runtime architecture](docs/architecture.md)
 - [WASM mod and scripting API](docs/scripting.md)
 - [WebView2 implementation notes](research/webview2-integration.md)
-- [Custom key-binding research](research/custom-key-bindings.md)
+- [Native key-binding implementation notes](research/custom-key-bindings.md)
 
 ## License
 

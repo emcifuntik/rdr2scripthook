@@ -10,6 +10,7 @@ add_executable(${PROJECT_NAME}
   ../rdrhook/src/wasm/Bindings.cpp
   ../rdrhook/src/wasm/Mod.cpp
   ../rdrhook/src/wasm/Runtime.cpp
+  ../rdrhook/src/input/InputBindingManager.cpp
 )
 
 file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/example-mod" WASM_EXAMPLE_MOD_PATH)

@@ -10,6 +10,19 @@ WebView interaction is exposed as `webviewSetFocus(bool)`,
 status code and use per-mod reference counting; every successful show should be
 balanced by a hide.
 
+Named input actions are exposed as `registerBinding(id, description, mapper,
+parameter)`, `unregisterBinding(handle)`, `pollBindingEvent(handle)`,
+`isBindingDown(handle)`, `bindingParameter(handle)`,
+`setBinding(handle, mapper, parameter)`, and `resetBinding(handle)`. Event `1`
+is Down, `2` is Up, and `0` means the queue is empty. Negative values are host
+errors. The F4 trainer action is implemented through this API.
+
+Manifest-declared actions are shown in the game's `Script Bindings` Controls
+category when a native slot is available. The declaration uses
+`[[input.bindings]]` with the same ID, description, mapper, and default key as
+`registerBinding`. A key changed in the game is visible immediately through
+`bindingParameter(handle)` and survives restart.
+
 Build from PowerShell at the repository root:
 
 ```powershell

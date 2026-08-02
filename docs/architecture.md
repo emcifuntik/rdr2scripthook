@@ -23,10 +23,10 @@ The launcher injects a small process hook into the Rockstar launcher so a new
 RDR2 process starts suspended. It then injects `rdrhook.dll` and resumes the
 game. If RDR2 is already running, it injects the runtime directly.
 
-The runtime initializes logging and hooks first, discovers the active graphics
-backend, installs the post-frontend renderer, and registers crash handling.
-The WASM runtime is created later from the RAGE script thread, which also scans
-the output directory's `mods/` folders.
+The runtime initializes logging, predeclares manifest input bindings, runs its
+engine hooks, discovers the active graphics backend, installs the post-frontend
+renderer, and registers crash handling. The WASM runtime and mod instances are
+created later from the RAGE script thread.
 
 ## Mod runtime
 
@@ -62,9 +62,37 @@ controller, suppresses corresponding game input, and requests RDR2's native
 cursor. Cursor show/hide calls are reference-counted per mod and remaining
 references are reclaimed on unload.
 
-The current general key API polls 256 Win32 virtual-key states once per script
-tick and dispatches down/up exports. Native, user-remappable RAGE bindings are
-planned separately; see the key-binding research document.
+The binding manager samples RAGE's double-buffered 256-key keyboard snapshot
+once per script tick, detects transitions, and queues independent Down/Up
+events for each named action. Runtime ownership and queued state are released
+when a mod unloads. Manifest-declared records remain reserved for the next load.
+Overrides are written atomically to `input-bindings.toml`.
+
+The native settings bridge prepends a `Script Bindings` category backed by a
+parallel 2048-entry synthetic-ID array. RDR2 1.0.1491.50's retail registry owns
+actions `0..784`; script row IDs `785..2832` are intercepted before retail code
+can index its fixed arrays. Jitasm bridges extend the row builder's enabled mask,
+isolate the retail conflict builder, and route lookup/remap operations for that
+range to the script binding manager. A row-refresh hook keeps both of the game's
+mapping widgets interactive. A mapping-expression bridge then appends the
+corresponding primary or alternate key through RAGE's native keyboard-glyph
+pipeline. Starting a remap temporarily retains one genuine retail keyboard
+mapping as RAGE's capture sentinel, then
+replaces only the capture identity with the supplemental control ID. The
+captured key and its mapping index are committed through the binding manager,
+so the sentinel mapping is never modified; no synthetic vtable or copied engine
+state is required.
+
+Hooks provide category entries, localized labels, current keyboard mappings,
+name lookup, and persistent remap commits. Signature scans happen only during
+DLL initialization and never from a game input callback.
+
+RDR2 constructs and caches the Controls category widgets before the WASM
+script thread starts. The host therefore reads `[[input.bindings]]` declarations
+from mod manifests during DLL initialization and publishes those controls at
+frontend startup. Later WASM registration adopts the matching reservation.
+Runtime-only registrations are intentionally not inserted into cached RAGE UI
+objects.
 
 ## Important thread boundaries
 

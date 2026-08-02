@@ -80,6 +80,35 @@ extern "C" {
     fn host_is_key_pressed(key: u32) -> i32;
     #[link_name = "is_key_just_pressed"]
     fn host_is_key_just_pressed(key: u32) -> i32;
+    #[link_name = "input_register_binding"]
+    fn host_input_register_binding(
+        id_pointer: *const u8,
+        id_length: i32,
+        description_pointer: *const u8,
+        description_length: i32,
+        mapper_pointer: *const u8,
+        mapper_length: i32,
+        parameter_pointer: *const u8,
+        parameter_length: i32,
+    ) -> i32;
+    #[link_name = "input_unregister_binding"]
+    fn host_input_unregister_binding(handle: i32) -> i32;
+    #[link_name = "input_poll_binding_event"]
+    fn host_input_poll_binding_event(handle: i32) -> i32;
+    #[link_name = "input_is_binding_down"]
+    fn host_input_is_binding_down(handle: i32) -> i32;
+    #[link_name = "input_get_binding_parameter"]
+    fn host_input_get_binding_parameter(handle: i32, destination: *mut u8, capacity: i32) -> i32;
+    #[link_name = "input_set_binding"]
+    fn host_input_set_binding(
+        handle: i32,
+        mapper_pointer: *const u8,
+        mapper_length: i32,
+        parameter_pointer: *const u8,
+        parameter_length: i32,
+    ) -> i32;
+    #[link_name = "input_reset_binding"]
+    fn host_input_reset_binding(handle: i32) -> i32;
     #[link_name = "webview_set_focus"]
     fn host_webview_set_focus(focused: i32) -> i32;
     #[link_name = "webview_is_focused"]
@@ -171,6 +200,69 @@ fn modify_runtime(runtime: Runtime) -> Runtime {
             .set(
                 "isKeyJustPressed",
                 Func::from(|key: i32| unsafe { host_is_key_just_pressed(key as u32) != 0 }),
+            )
+            .unwrap();
+        bridge
+            .set(
+                "registerBinding",
+                Func::from(
+                    |id: String, description: String, mapper: String, parameter: String| unsafe {
+                        host_input_register_binding(
+                            id.as_ptr(),
+                            id.len() as i32,
+                            description.as_ptr(),
+                            description.len() as i32,
+                            mapper.as_ptr(),
+                            mapper.len() as i32,
+                            parameter.as_ptr(),
+                            parameter.len() as i32,
+                        )
+                    },
+                ),
+            )
+            .unwrap();
+        bridge
+            .set(
+                "unregisterBinding",
+                Func::from(|handle: i32| unsafe { host_input_unregister_binding(handle) }),
+            )
+            .unwrap();
+        bridge
+            .set(
+                "pollBindingEvent",
+                Func::from(|handle: i32| unsafe { host_input_poll_binding_event(handle) }),
+            )
+            .unwrap();
+        bridge
+            .set(
+                "isBindingDown",
+                Func::from(|handle: i32| unsafe { host_input_is_binding_down(handle) }),
+            )
+            .unwrap();
+        bridge
+            .set(
+                "bindingParameter",
+                Func::from(|handle: i32| read_binding_parameter(handle)),
+            )
+            .unwrap();
+        bridge
+            .set(
+                "setBinding",
+                Func::from(|handle: i32, mapper: String, parameter: String| unsafe {
+                    host_input_set_binding(
+                        handle,
+                        mapper.as_ptr(),
+                        mapper.len() as i32,
+                        parameter.as_ptr(),
+                        parameter.len() as i32,
+                    )
+                }),
+            )
+            .unwrap();
+        bridge
+            .set(
+                "resetBinding",
+                Func::from(|handle: i32| unsafe { host_input_reset_binding(handle) }),
             )
             .unwrap();
         bridge
@@ -371,6 +463,21 @@ fn read_metadata(field: i32) -> String {
 
     let mut bytes = vec![0_u8; length as usize + 1];
     let copied = unsafe { host_mod_info(field, bytes.as_mut_ptr(), bytes.len() as i32) };
+    if copied < 0 || copied as usize >= bytes.len() {
+        return String::new();
+    }
+    bytes.truncate(copied as usize);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+fn read_binding_parameter(handle: i32) -> String {
+    let length = unsafe { host_input_get_binding_parameter(handle, std::ptr::null_mut(), 0) };
+    if length < 0 {
+        return String::new();
+    }
+    let mut bytes = vec![0_u8; length as usize + 1];
+    let copied =
+        unsafe { host_input_get_binding_parameter(handle, bytes.as_mut_ptr(), bytes.len() as i32) };
     if copied < 0 {
         return String::new();
     }

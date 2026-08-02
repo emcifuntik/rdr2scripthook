@@ -21,6 +21,29 @@ unsafe extern "C" {
     pub fn is_key_pressed(key: u32) -> i32;
     pub fn is_key_just_pressed(key: u32) -> i32;
 
+    pub fn input_register_binding(
+        id_pointer: *const u8,
+        id_length: i32,
+        description_pointer: *const u8,
+        description_length: i32,
+        mapper_pointer: *const u8,
+        mapper_length: i32,
+        parameter_pointer: *const u8,
+        parameter_length: i32,
+    ) -> i32;
+    pub fn input_unregister_binding(handle: i32) -> i32;
+    pub fn input_poll_binding_event(handle: i32) -> i32;
+    pub fn input_is_binding_down(handle: i32) -> i32;
+    pub fn input_get_binding_parameter(handle: i32, destination: *mut u8, capacity: i32) -> i32;
+    pub fn input_set_binding(
+        handle: i32,
+        mapper_pointer: *const u8,
+        mapper_length: i32,
+        parameter_pointer: *const u8,
+        parameter_length: i32,
+    ) -> i32;
+    pub fn input_reset_binding(handle: i32) -> i32;
+
     pub fn webview_open(pointer: *const u8, length: i32, width: i32, height: i32) -> i32;
     pub fn webview_close();
     pub fn webview_is_open() -> i32;

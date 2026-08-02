@@ -10,6 +10,7 @@ pub mod core;
 pub mod event;
 pub mod global;
 pub mod hash;
+pub mod input;
 pub mod log;
 pub mod metadata;
 pub mod native;
