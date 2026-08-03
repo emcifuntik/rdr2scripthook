@@ -1,0 +1,5 @@
+id,name,iterations,seed
+0,integer_mix,5000000,305419896
+1,branching,5000000,2271560481
+2,memory_transform,1000,324508639
+3,call_chain,5000000,610839776

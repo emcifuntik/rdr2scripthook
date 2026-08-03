@@ -2,6 +2,8 @@
 /BUILD/
 /BIN/
 /LIB/
+/benchmarks/artifacts/
+/benchmarks/results/
 **/target/
 **/bin/
 **/obj/

@@ -1,0 +1,13 @@
+{
+  "id": "lua-wasmtime",
+  "display_name": "Lua AOT (Wasmtime)",
+  "suite": "lua",
+  "workloads": "suites/lua.csv",
+  "source_repository": "lua-to-asm",
+  "baseline": false,
+  "mode": "wasmtime",
+  "artifact": "artifacts/lua-wasmtime/module.wasm",
+  "unsupported_workloads": [
+    "coroutine_yield_resume"
+  ]
+}

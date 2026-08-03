@@ -183,6 +183,7 @@ and lifecycle example live in [`scripts/lua-wasm`](scripts/lua-wasm).
 | `shared/static/mods/` | Bundled manifests and WASM modules copied into output. |
 | `tools/codegen/` | RDR3 native-wrapper generator. |
 | `wasmtest/` | Headless ABI and guest-runtime integration tests. |
+| `benchmarks/` | Extensible native-versus-Wasmtime runtime benchmarks. |
 | `research/` | Reverse-engineering and engine-integration notes. |
 
 ## Documentation

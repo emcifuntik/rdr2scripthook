@@ -1,0 +1,11 @@
+{
+  "id": "lua-native",
+  "display_name": "Lua 5.5 (native)",
+  "suite": "lua",
+  "workloads": "suites/lua.csv",
+  "source_repository": "lua-to-asm",
+  "baseline": true,
+  "mode": "native",
+  "artifact": "artifacts/lua-native/lua-native-bench.exe",
+  "source": "shared/lua/benchmark_kernels.lua"
+}

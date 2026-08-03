@@ -1,0 +1,9 @@
+{
+  "id": "dotnet-nativeaot",
+  "display_name": ".NET NativeAOT (win-x64)",
+  "suite": "dotnet",
+  "workloads": "suites/dotnet.csv",
+  "baseline": true,
+  "mode": "native",
+  "artifact": "artifacts/dotnet-nativeaot/dotnet-native-bench.exe"
+}

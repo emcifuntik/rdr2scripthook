@@ -1,0 +1,9 @@
+{
+  "id": "dotnet-wasmtime",
+  "display_name": ".NET NativeAOT-LLVM (Wasmtime)",
+  "suite": "dotnet",
+  "workloads": "suites/dotnet.csv",
+  "baseline": false,
+  "mode": "wasmtime",
+  "artifact": "artifacts/dotnet-wasmtime/module.wasm"
+}
