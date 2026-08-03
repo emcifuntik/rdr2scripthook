@@ -67,6 +67,35 @@ add_custom_target(javy_example
         "${CMAKE_CURRENT_SOURCE_DIR}/shared/static/mods/javy-trainer/main.wasm"
 )
 
+# Build the C# example into a self-contained WASI Preview 1 core module.
+add_custom_target(dotnet_example
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/dotnet-wasm/build.ps1"
+            -Configuration Release -LockedMode
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Building the .NET NativeAOT-LLVM WASM example..."
+    SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/dotnet-wasm/build.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/dotnet-wasm/bootstrap-wasi-sdk.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/dotnet-wasm/example/Entrypoints.cs"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/dotnet-wasm/Rdr2.Wasm.Sdk/Host.cs"
+    BYPRODUCTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/shared/static/mods/dotnet-example/main.wasm"
+)
+
+# Lua compilation remains owned by the external compiler; this target only verifies the
+# pinned, synchronized artifact consumed by ScriptHook.
+add_custom_target(lua_example_verify
+    COMMAND powershell -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/lua-wasm/verify.ps1"
+    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+    COMMENT "Verifying the synchronized Lua WASM artifact..."
+    SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/lua-wasm/compiler.lock.json"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/lua-wasm/verify.ps1"
+        "${CMAKE_CURRENT_SOURCE_DIR}/shared/static/mods/lua-example/main.wasm"
+)
+
 # Target selection
 set(TARGET_PROJECT "all" CACHE STRING "Project to CMake")
  

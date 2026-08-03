@@ -1,0 +1,44 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "Microsoft.DotNet.ILCompiler.LLVM": {
+        "type": "Direct",
+        "requested": "[10.0.0-rc.1.26357.1, )",
+        "resolved": "10.0.0-rc.1.26357.1",
+        "contentHash": "XrIZBfXRkiJX15BQUuMKui65GzhFtS/xfTvt0ueWup0kPvwIma4xXyS9aJJkcqsBrU8vHttcNREOx1rdg/WCKw=="
+      },
+      "Microsoft.NET.ILLink.Tasks": {
+        "type": "Direct",
+        "requested": "[10.0.7, )",
+        "resolved": "10.0.7",
+        "contentHash": "AA/yhzFHNtQZXLdqjzujPy25G8EWwGWsAnxOE2zYSBoT/8QHP6ketN3CToD3DFreO653ipUwnKHo22B8AlBMCw=="
+      },
+      "runtime.win-x64.Microsoft.DotNet.ILCompiler.LLVM": {
+        "type": "Direct",
+        "requested": "[10.0.0-rc.1.26357.1, )",
+        "resolved": "10.0.0-rc.1.26357.1",
+        "contentHash": "zyb5LZvJAEy8P0LNhhy6iNtj36HCrHkpITm6HJK+XN/oleyiUKcSJvy2zw49QTgHLq61WqbKk8U7j4HFwz1zcA=="
+      },
+      "rdr2.wasm.sdk": {
+        "type": "Project"
+      }
+    },
+    "net10.0/wasi-wasm": {
+      "Microsoft.DotNet.ILCompiler.LLVM": {
+        "type": "Direct",
+        "requested": "[10.0.0-rc.1.26357.1, )",
+        "resolved": "10.0.0-rc.1.26357.1",
+        "contentHash": "XrIZBfXRkiJX15BQUuMKui65GzhFtS/xfTvt0ueWup0kPvwIma4xXyS9aJJkcqsBrU8vHttcNREOx1rdg/WCKw==",
+        "dependencies": {
+          "runtime.wasi-wasm.Microsoft.DotNet.ILCompiler.LLVM": "10.0.0-rc.1.26357.1"
+        }
+      },
+      "runtime.wasi-wasm.Microsoft.DotNet.ILCompiler.LLVM": {
+        "type": "Transitive",
+        "resolved": "10.0.0-rc.1.26357.1",
+        "contentHash": "908lXR2VeEZs07PzrZcfBkTFmfeslYen6j/6fKn5pgctxX5XwlTyR7Hm5t+t+DOfyK8wXY4vy/DrkZZIc+OV4Q=="
+      }
+    }
+  }
+}

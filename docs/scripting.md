@@ -3,7 +3,9 @@
 ## Mod layout
 
 The loader scans `mods/<directory>/mod.toml`. `name` and `entrypoint` are
-required; `runtime` defaults to `wasmtime` and may also be `javy`.
+required; `runtime` defaults to `wasmtime` and may also be `javy`, `dotnet`,
+or `lua`. These names select an ABI profile, not a native runtime: every module
+is instantiated by the same embedded Wasmtime engine.
 
 ```toml
 [mod]
@@ -161,9 +163,61 @@ Javy modules use `init`, optional `tick`, and optional `shutdown` exports. See
 `scripts/javy-wasm/README.md` and its trainer source for the supported bridge
 methods and build flow.
 
+## C#/.NET guest
+
+`scripts/dotnet-wasm/Rdr2.Wasm.Sdk` exposes low-level wrappers over the same
+`rdr2` host ABI used by Rust. NativeAOT-LLVM compiles the mod and the required
+.NET runtime/BCL subset into one self-contained WASI Preview 1 core module.
+The game process never loads CoreCLR, hostfxr, Mono, managed assemblies, or a
+JIT.
+
+Lifecycle methods are static `[UnmanagedCallersOnly]` exports using the normal
+`rdr2_*` names. Only primitive values and guest linear-memory offsets cross the
+boundary. An export must catch or avoid every exception because managed
+exceptions may not escape into the host. Build the example with
+`scripts/dotnet-wasm/build.ps1`.
+
+## Lua guest
+
+Lua source is compiled ahead of time by the separate compiler repository.
+ScriptHook does not contain or build the compiler; it consumes the locked
+`main.wasm` artifact under `shared/static/mods/lua-example`. Run
+`scripts/lua-wasm/sync.ps1` after updating the compiler, then commit the module and
+updated `compiler.lock.json` together.
+
+Lua lifecycle callbacks use the existing event registry:
+
+```lua
+register_event("tick", function()
+  -- Runs on the game script tick.
+end)
+
+register_event("key_down", function(key)
+  -- Win32 virtual-key value.
+end)
+
+register_event("shutdown", function()
+  -- Release guest state.
+end)
+```
+
+The `rdr2` Lua profile exposes these globals directly: `log`, `joaat`,
+`game_time`, `is_key_pressed`, `is_key_just_pressed`,
+`input_register_binding`, `input_unregister_binding`,
+`input_poll_binding_event`, `input_is_binding_down`,
+`input_get_binding_parameter`, `input_set_binding`, `input_reset_binding`,
+`webview_open`, `webview_close`, `webview_is_open`, `webview_set_visible`,
+`webview_is_visible`, `webview_set_focus`, `webview_is_focused`,
+`webview_show_cursor`, `webview_hide_cursor`,
+`webview_is_cursor_visible`, `webview_cursor_ref_count`, `webview_navigate`,
+`webview_post_json`, and `webview_poll_json`. JSON strings returned to Lua are
+currently limited to 2048 bytes by the Lua guest's host-result pool.
+
 ## Lifecycle rules
 
 - Keep per-frame work short; every guest export has a fuel budget.
+- Do not expect filesystem, environment, process, or network access. Restricted
+  WASI supplies empty stdin and host-owned stdout/stderr only.
 - Balance cursor references and release focus before hiding interactive UI.
 - Treat native wrappers as unsafe engine calls, even when Rust types compile.
 - Do not retain raw game pointers across frames unless the native contract

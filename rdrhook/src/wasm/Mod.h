@@ -1,5 +1,6 @@
 #pragma once
 
+#include "GuestProfile.h"
 #include "Runtime.h"
 
 #include <cstdint>
@@ -22,7 +23,7 @@ struct ModManifest {
 
 class Mod {
 public:
-    Mod(Runtime& runtime, ModManifest manifest);
+    Mod(Runtime& runtime, ModManifest manifest, const GuestProfile& profile);
     ~Mod();
 
     Mod(const Mod&) = delete;
@@ -44,19 +45,15 @@ private:
               const wasmtime_val_t* args = nullptr, size_t argCount = 0,
               wasmtime_val_t* results = nullptr, size_t resultCount = 0);
     bool CheckAbiVersion();
+    bool ValidateModuleImports(const wasmtime_module_t* module) const;
+    bool ConfigureRestrictedWasi();
     void Reset();
 
     static constexpr uint32_t AbiVersion = 1;
-    static constexpr uint64_t FuelPerCall = 10'000'000;
-    static constexpr uint64_t JavyFuelPerCall = 100'000'000;
-
-    bool IsJavy() const noexcept { return m_manifest.runtime == "javy"; }
-    uint64_t ExecutionFuel() const noexcept {
-        return IsJavy() ? JavyFuelPerCall : FuelPerCall;
-    }
 
     Runtime& m_runtime;
     ModManifest m_manifest;
+    const GuestProfile& m_profile;
     wasmtime_store_t* m_store = nullptr;
     wasmtime_context_t* m_context = nullptr;
     wasmtime_instance_t m_instance{};

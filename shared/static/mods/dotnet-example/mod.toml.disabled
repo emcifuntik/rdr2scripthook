@@ -1,0 +1,13 @@
+[mod]
+name = ".NET Wasmtime Example"
+version = "0.1.0"
+author = "RDR2 Script Hook"
+description = "C# compiled ahead of time to a sandboxed Wasmtime guest"
+entrypoint = "main.wasm"
+runtime = "dotnet"
+
+[[input.bindings]]
+id = "toggle_dotnet_example"
+description = "Toggle .NET Wasmtime example"
+mapper = "keyboard"
+default = "F5"

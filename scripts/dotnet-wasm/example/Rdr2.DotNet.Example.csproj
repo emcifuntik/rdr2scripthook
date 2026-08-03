@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>library</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifier>wasi-wasm</RuntimeIdentifier>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <PublishTrimmed>true</PublishTrimmed>
+    <SelfContained>true</SelfContained>
+    <MSBuildEnableWorkloadResolver>false</MSBuildEnableWorkloadResolver>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <OptimizationPreference>Size</OptimizationPreference>
+    <DebugType>none</DebugType>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Rdr2.Wasm.Sdk\Rdr2.Wasm.Sdk.csproj" />
+    <PackageReference Include="Microsoft.DotNet.ILCompiler.LLVM"
+                      Version="10.0.0-rc.1.26357.1" />
+    <PackageReference Include="runtime.$(NETCoreSdkPortableRuntimeIdentifier).Microsoft.DotNet.ILCompiler.LLVM"
+                      Version="10.0.0-rc.1.26357.1" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(Rdr2WasiSysroot)' != ''">
+    <LinkerArg Include="--sysroot=&quot;$(Rdr2WasiSysroot)&quot;" />
+    <LinkerArg Include="-resource-dir=&quot;$(Rdr2ClangResourceDir)&quot;"
+               Condition="'$(Rdr2ClangResourceDir)' != ''" />
+  </ItemGroup>
+</Project>

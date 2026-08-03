@@ -59,7 +59,7 @@ bool ModLoader::ParseManifest(const std::filesystem::path& path,
                           path.string());
             return false;
         }
-        if (out.runtime != "wasmtime" && out.runtime != "javy") {
+        if (!FindGuestProfile(out.runtime)) {
             spdlog::error("[WASM] Invalid runtime '{}' in {}",
                           out.runtime, path.string());
             return false;
@@ -78,7 +78,10 @@ bool ModLoader::LoadOneMod(const std::filesystem::path& modDirectory) {
 
     spdlog::info("[WASM] Loading {} v{} by {}", manifest.name,
                  manifest.version, manifest.author);
-    auto mod = std::make_unique<Mod>(GetRuntime(), std::move(manifest));
+    const auto* profile = FindGuestProfile(manifest.runtime);
+    if (!profile) return false;
+    auto mod = std::make_unique<Mod>(GetRuntime(), std::move(manifest),
+                                     *profile);
     if (!mod->LoadEntrypoint()) return false;
 
     spdlog::info("[WASM] Loaded {}", mod->Manifest().name);

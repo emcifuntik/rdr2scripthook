@@ -148,6 +148,17 @@ int main() {
     auto& runtime = rdr2wasm::GetRuntime();
     if (!runtime.IsValid()) return 1;
 
+    const auto* rawProfile = rdr2wasm::FindGuestProfile("wasmtime");
+    const auto* dotnetProfile = rdr2wasm::FindGuestProfile("dotnet");
+    const auto* luaProfile = rdr2wasm::FindGuestProfile("lua");
+    if (!rawProfile || !dotnetProfile || !luaProfile ||
+        rdr2wasm::FindGuestProfile("unknown") != nullptr) return 50;
+    if (rawProfile->AllowsImportModule("wasi_snapshot_preview1") ||
+        !dotnetProfile->AllowsImportModule("wasi_snapshot_preview1") ||
+        !luaProfile->AllowsImportModule("wasi_snapshot_preview1") ||
+        dotnetProfile->AllowsImportModule("env") ||
+        luaProfile->AllowsImportModule("filesystem")) return 51;
+
     auto& inputManager = rdr2::input::InputBindingManager::Instance();
     inputManager.ResetForTesting();
     int testOwner = 0;
@@ -315,7 +326,8 @@ int main() {
         .modPath = std::filesystem::path(WASM_EXAMPLE_MOD_PATH),
     };
 
-    rdr2wasm::Mod mod(runtime, std::move(manifest));
+    rdr2wasm::Mod mod(runtime, std::move(manifest),
+                      *rdr2wasm::FindGuestProfile("wasmtime"));
     if (!mod.LoadEntrypoint()) return 2;
 
     // The trainer registers a persistent action and receives its Down/Up
@@ -344,7 +356,8 @@ int main() {
         .runtime = "javy",
         .modPath = std::filesystem::path(WASM_JAVY_MOD_PATH),
     };
-    rdr2wasm::Mod javyMod(runtime, std::move(javyManifest));
+    rdr2wasm::Mod javyMod(runtime, std::move(javyManifest),
+                          *rdr2wasm::FindGuestProfile("javy"));
     if (!javyMod.LoadEntrypoint()) return 10;
 
     const int initialCreatedPeds = g_createdPeds;
@@ -417,5 +430,41 @@ int main() {
 
     pressJavyKey(0x73); // F4: close menu.
     if (!javyHealthy) return 18;
+
+    rdr2wasm::ModManifest dotnetManifest{
+        .name = ".NET WASM smoke test",
+        .version = "0.1.0",
+        .author = "RDR2 Script Hook",
+        .description = "Loads a C# NativeAOT-LLVM core module",
+        .entrypoint = "main.wasm",
+        .runtime = "dotnet",
+        .modPath = std::filesystem::path(WASM_DOTNET_MOD_PATH),
+    };
+    rdr2wasm::Mod dotnetMod(runtime, std::move(dotnetManifest),
+                            *rdr2wasm::FindGuestProfile("dotnet"));
+    if (!dotnetMod.LoadEntrypoint()) return 46;
+    if (!dotnetMod.Tick()) return 47;
+
+    rdr2wasm::ModManifest luaManifest{
+        .name = "Lua WASM smoke test",
+        .version = "0.1.0",
+        .author = "RDR2 Script Hook",
+        .description = "Loads a Lua core module",
+        .entrypoint = "main.wasm",
+        .runtime = "lua",
+        .modPath = std::filesystem::path(WASM_LUA_MOD_PATH),
+    };
+    rdr2wasm::Mod luaMod(runtime, std::move(luaManifest),
+                         *rdr2wasm::FindGuestProfile("lua"));
+    if (!luaMod.LoadEntrypoint()) return 48;
+    if (!luaMod.Tick()) return 49;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x75, true);
+    if (!luaMod.Tick()) return 50;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x75, false);
+    if (!luaMod.Tick()) return 51;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x75, true);
+    if (!luaMod.Tick()) return 52;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x75, false);
+    if (!luaMod.Tick()) return 53;
     return 0;
 }

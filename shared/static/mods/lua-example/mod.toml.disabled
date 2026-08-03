@@ -1,0 +1,13 @@
+[mod]
+name = "Lua Frontier Example"
+version = "0.1.0"
+author = "RDR2 Script Hook"
+description = "A polished Lua-driven WebView example"
+entrypoint = "main.wasm"
+runtime = "lua"
+
+[[input.bindings]]
+id = "toggle_lua_example"
+description = "Toggle Lua Frontier example"
+mapper = "keyboard"
+default = "F6"
