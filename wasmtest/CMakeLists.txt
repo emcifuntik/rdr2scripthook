@@ -8,6 +8,7 @@ find_package(wasmtime CONFIG REQUIRED)
 add_executable(${PROJECT_NAME}
   src/main.cpp
   ../rdrhook/src/wasm/Bindings.cpp
+  ../rdrhook/src/wasm/GuestProfile.cpp
   ../rdrhook/src/wasm/Mod.cpp
   ../rdrhook/src/wasm/Runtime.cpp
   ../rdrhook/src/input/InputBindingManager.cpp
@@ -15,6 +16,8 @@ add_executable(${PROJECT_NAME}
 
 file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/example-mod" WASM_EXAMPLE_MOD_PATH)
 file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/javy-trainer" WASM_JAVY_MOD_PATH)
+file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/dotnet-example" WASM_DOTNET_MOD_PATH)
+file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/lua-example" WASM_LUA_MOD_PATH)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
   ../rdrhook/src
@@ -24,6 +27,8 @@ target_include_directories(${PROJECT_NAME} PRIVATE
 target_compile_definitions(${PROJECT_NAME} PRIVATE
   WASM_EXAMPLE_MOD_PATH="${WASM_EXAMPLE_MOD_PATH}"
   WASM_JAVY_MOD_PATH="${WASM_JAVY_MOD_PATH}"
+  WASM_DOTNET_MOD_PATH="${WASM_DOTNET_MOD_PATH}"
+  WASM_LUA_MOD_PATH="${WASM_LUA_MOD_PATH}"
   RDR2_WASM_TEST
   UNICODE
   _UNICODE

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "compiler_repository": "lua-to-asm",
+  "compiler_commit": "c5b0dd972dfbc670dd53a58dbbf22405ec6de3a2",
+  "compiler_worktree_dirty": false,
+  "compiler_source_sha256": "a87dd431b4b8595809c7395b465244ec64a593acd04f9763c941260cdd7fbc4f",
+  "compiler_abi_version": 1,
+  "scripthook_abi_version": 1,
+  "artifact": "shared/static/mods/lua-example/main.wasm",
+  "artifact_sha256": "9a196823275470208bbac60afdde186b0ed09ea519d771ad5135ebbbaa1b98c1"
+}

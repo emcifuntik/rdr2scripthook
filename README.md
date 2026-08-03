@@ -11,7 +11,7 @@
 
 </div>
 
-RDR2 Script Hook loads isolated Rust or JavaScript WebAssembly mods, exposes a
+RDR2 Script Hook loads isolated Rust, JavaScript, C#, and Lua WebAssembly mods, exposes a
 typed scripting API, and renders interactive browser interfaces directly in the
 game's post-HUD render path. It includes a launcher, in-process runtime, guest
 SDK, native-code generator, example trainers, and a headless integration-test
@@ -29,7 +29,8 @@ host.
   execution fuel.
 - Typed Rust wrappers generated from the RDR3 native database, plus globals,
   timers, logging, metadata, and frame/key events.
-- Rust `wasm32-unknown-unknown` and JavaScript/Javy guest runtimes.
+- Rust, JavaScript/Javy, C# NativeAOT-LLVM, and Lua guest profiles, all
+  executed by the same embedded Wasmtime runtime.
 - Transparent WebView2 overlays composed after the game HUD without CPU texture
   readback.
 - Synchronized shared-texture paths for both Direct3D 12 and Vulkan.
@@ -45,7 +46,7 @@ host.
 
 ```mermaid
 flowchart LR
-    Mods["Rust / Javy WASM mods"] -->|stable host ABI| Host["Wasmtime host"]
+    Mods["Rust / Javy / .NET / Lua modules"] -->|stable host ABI| Host["Wasmtime host"]
     Host -->|natives, globals, timers| Rage["RAGE runtime"]
     Rage -->|Down / Up events| Bindings["Script Bindings"]
     Bindings --> Host
@@ -66,18 +67,18 @@ access to WebView2 or renderer COM objects.
 | Operating system | Windows x64 |
 | Game | Red Dead Redemption 2, executable layout `1.0.1491.50` |
 | Graphics APIs | Direct3D 12 and Vulkan |
-| Guest runtimes | Rust/WASM through Wasmtime; JavaScript through Javy |
+| Guest runtimes | Rust, Javy, .NET NativeAOT-LLVM, and Lua; Wasmtime only |
 | Browser UI | Microsoft Edge WebView2 Runtime |
 | Native toolchain | Visual Studio Build Tools, CMake, Ninja, `clang-cl` |
 
 Graphics interop and RAGE hooks require live in-game testing. The headless test
-suite covers the host ABI, native marshalling, WebView imports, both guest
-runtimes, and repeated ticks.
+suite covers the host ABI, native marshalling, WebView imports, all four guest
+profiles, and repeated ticks.
 
 ## Build
 
 Install Visual Studio C++ Build Tools, CMake 3.21+, Ninja, Python 3, Git, Rust,
-and PowerShell. Run the following from a Visual Studio developer PowerShell:
+.NET SDK 10, and PowerShell. Run the following from a Visual Studio developer PowerShell:
 
 ```powershell
 git clone --recurse-submodules https://github.com/emcifuntik/rdr2scripthook.git
@@ -95,6 +96,8 @@ Build the bundled JavaScript example separately when needed:
 
 ```powershell
 .\scripts\javy-wasm\build.ps1
+.\scripts\dotnet-wasm\build.ps1
+.\scripts\lua-wasm\verify.ps1
 ```
 
 Release output is written to `BIN/Release`. Keep `launcher.exe`,
@@ -161,7 +164,9 @@ rdr2_wasm::entrypoint!(initialize);
 
 For an end-to-end implementation, see the Rust WebView trainer in
 [`scripts/example-wasm`](scripts/example-wasm) or the JavaScript trainer in
-[`scripts/javy-wasm`](scripts/javy-wasm).
+[`scripts/javy-wasm`](scripts/javy-wasm). The C# AOT SDK and example live in
+[`scripts/dotnet-wasm`](scripts/dotnet-wasm); the synchronized Lua artifact
+and lifecycle example live in [`scripts/lua-wasm`](scripts/lua-wasm).
 
 ## Repository layout
 
@@ -173,6 +178,8 @@ For an end-to-end implementation, see the Rust WebView trainer in
 | `scripts/rdr2-wasm/` | Rust guest SDK and stable ABI wrappers. |
 | `scripts/example-wasm/` | Rust WebView trainer with an F3 default binding. |
 | `scripts/javy-wasm/` | JavaScript/Javy trainer with an F4 default binding. |
+| `scripts/dotnet-wasm/` | C# SDK and NativeAOT-LLVM core-module example. |
+| `scripts/lua-wasm/` | Lua artifact synchronization, ABI lock, and example. |
 | `shared/static/mods/` | Bundled manifests and WASM modules copied into output. |
 | `tools/codegen/` | RDR3 native-wrapper generator. |
 | `wasmtest/` | Headless ABI and guest-runtime integration tests. |
@@ -184,7 +191,7 @@ For an end-to-end implementation, see the Rust WebView trainer in
 | --- | --- |
 | [Building and testing](docs/building.md) | Toolchain, targets, examples, and verification. |
 | [Runtime architecture](docs/architecture.md) | Process lifecycle, render paths, input, and ownership. |
-| [WASM scripting API](docs/scripting.md) | Manifest format, Rust/Javy APIs, bindings, and WebViews. |
+| [WASM scripting API](docs/scripting.md) | Manifest format, guest profiles, bindings, and WebViews. |
 | [WebView2 integration notes](research/webview2-integration.md) | Offscreen composition and graphics synchronization. |
 | [Native key-binding notes](research/custom-key-bindings.md) | Controls-menu integration and persistence model. |
 

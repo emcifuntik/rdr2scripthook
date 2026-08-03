@@ -3,6 +3,8 @@
 /BIN/
 /LIB/
 **/target/
+**/bin/
+**/obj/
 
 # Local CMake and IDE state
 /CMakeUserPresets.json

@@ -30,10 +30,18 @@ created later from the RAGE script thread.
 
 ## Mod runtime
 
-Each mod gets its own Wasmtime store and module instance. The host enforces a
+Each mod gets its own Wasmtime store and module instance. `wasmtime`, `javy`,
+`dotnet`, and `lua` are guest ABI profiles; none introduces another execution
+engine. The host enforces a
 64 MiB linear-memory limit and replenishes a bounded fuel budget before each
 export call. A failing tick export is disabled without preventing later mod
 shutdown cleanup.
+
+Before instantiation, every imported module is checked against the profile
+allowlist. Plain Rust modules may import only `rdr2`. Javy, .NET, and Lua may
+also import `wasi_snapshot_preview1`; their WASI context inherits no arguments,
+environment variables, directories, or sockets. Standard streams are replaced
+with host-owned logging callbacks.
 
 Host resources are owned by the creating mod. Unload releases cursor
 references and closes the singleton WebView when that mod owns it.

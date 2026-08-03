@@ -1,0 +1,2 @@
+scripts/dotnet-wasm/example/packages.lock.json text eol=lf
+scripts/lua-wasm/compiler.lock.json text eol=lf

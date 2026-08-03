@@ -80,6 +80,11 @@ jobs:
         with:
           targets: wasm32-unknown-unknown, wasm32-wasip1
 
+      - name: Install pinned .NET SDK
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.203
+
       - name: Cache build data
         uses: actions/cache@v5
         with:
@@ -89,8 +94,10 @@ jobs:
             scripts\example-wasm\target
             scripts\javy-wasm\plugin\target
             BUILD\javy-src
+            BUILD\dotnet-toolchain
+            ~\.nuget\packages
             BUILD\vcpkg-binary-cache
-          key: windows-build-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**', '**/Cargo.lock', 'scripts/javy-wasm/build.ps1', 'scripts/javy-wasm/javy-9.1-runtime.patch') }}
+          key: windows-build-${{ hashFiles('vcpkg.json', 'vcpkg-ports/**', '**/Cargo.lock', 'scripts/javy-wasm/build.ps1', 'scripts/javy-wasm/javy-9.1-runtime.patch', 'scripts/dotnet-wasm/**', 'scripts/lua-wasm/compiler.lock.json') }}
           restore-keys: |
             windows-build-
 
@@ -113,6 +120,9 @@ jobs:
 
           & .\scripts\javy-wasm\build.ps1
           if ($LASTEXITCODE -ne 0) { throw "Javy example build failed: $LASTEXITCODE" }
+
+          & .\scripts\dotnet-wasm\build.ps1 -LockedMode
+          & .\scripts\lua-wasm\verify.ps1
 
       - name: Configure
         shell: pwsh

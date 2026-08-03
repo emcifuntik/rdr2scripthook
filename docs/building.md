@@ -10,6 +10,7 @@
 - Git with submodule support
 - Rust and the `wasm32-unknown-unknown` target for Rust guest examples
 - PowerShell for the Javy build script
+- .NET SDK 10.0.203 for the C# NativeAOT-LLVM example
 - Microsoft Edge WebView2 Runtime on the game machine
 
 Dependencies are declared in `vcpkg.json`. The checked-out `vcpkg` submodule
@@ -34,6 +35,8 @@ The main targets are:
 - `wasmtest.exe` — headless WASM smoke test;
 - `generate_natives` — regenerates `scripts/rdr2-wasm/src/natives.rs`;
 - `javy_example` — builds and deploys the JavaScript example.
+- `dotnet_example` — builds and deploys the C# NativeAOT-LLVM example.
+- `lua_example_verify` — verifies the synchronized Lua artifact and ABI lock.
 
 Artifacts are emitted to `BIN/Release` or `BIN/Debug`. CMake copies
 `shared/static` into each output tree during configuration.
@@ -71,6 +74,30 @@ The first run builds the pinned Javy toolchain under `BUILD/`; later runs reuse
 it. The script compiles the custom host plugin, writes the combined module, and
 updates existing build output directories.
 
+## C#/.NET example
+
+```powershell
+.\scripts\dotnet-wasm\build.ps1 -LockedMode
+```
+
+The script pins .NET SDK 10.0.203, NativeAOT-LLVM
+10.0.0-rc.1.26357.1, and WASI SDK 29.0. The SDK archive is downloaded once
+under `BUILD/dotnet-toolchain` and checksum-verified. Output is a WASI Preview
+1 reactor core module; it contains no CoreCLR/Mono sidecar.
+
+## Lua example
+
+Lua compilation stays in the sibling `lua-to-asm` repository. After building
+its compiler executable, synchronize the artifact explicitly:
+
+```powershell
+.\scripts\lua-wasm\sync.ps1
+.\scripts\lua-wasm\verify.ps1
+```
+
+CI performs only the verification step and embedded Wasmtime smoke test. It
+does not compile Lua or vendor the compiler into this repository.
+
 ## Verification
 
 Run the native/WASM smoke test after a Release build:
@@ -81,7 +108,8 @@ if ($LASTEXITCODE -ne 0) { throw "wasmtest failed: $LASTEXITCODE" }
 ```
 
 This verifies Wasmtime instantiation, the Rust ABI, representative native
-marshalling, WebView host imports, the Javy lifecycle, and repeated ticks.
+marshalling, WebView host imports, the Javy lifecycle, C# NativeAOT exports,
+the Lua lifecycle, import allowlists, and repeated ticks.
 Graphics interop and live RAGE hooks still require in-game testing on both
 Direct3D 12 and Vulkan.
 
