@@ -30,3 +30,14 @@ The bundled example registers F6 and opens a styled Lua WebView with
 focus and a reference-counted game cursor. F6 hides it again. The source
 manifest is opt-in (`mod.toml.disabled`); after it is enabled in a `BIN`
 output, `sync.ps1` refreshes that output's `main.wasm` automatically.
+
+`Frontier Watch` is a larger multi-file Lua example. It exercises recursive
+static `require`, persistent input, bidirectional WebView JSON messages, live
+game-time updates, and balanced focus/cursor ownership. Build and install it
+into the local Release output with:
+
+```powershell
+.\scripts\lua-wasm\sync-frontier-watch.ps1 -InstallRelease
+```
+
+Its default binding is F9 and can be remapped under Script Bindings.

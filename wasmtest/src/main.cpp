@@ -466,5 +466,30 @@ int main() {
     if (!luaMod.Tick()) return 52;
     rdr2wasm::bindings::SetKeyStateForTesting(0x75, false);
     if (!luaMod.Tick()) return 53;
+
+    rdr2wasm::ModManifest frontierWatchManifest{
+        .name = "Frontier Watch smoke test",
+        .version = "1.0.0",
+        .author = "RDR2 Script Hook",
+        .description = "Loads the multi-file Lua WebView mod",
+        .entrypoint = "main.wasm",
+        .runtime = "lua",
+        .modPath = std::filesystem::path(WASM_FRONTIER_WATCH_MOD_PATH),
+    };
+    rdr2wasm::Mod frontierWatchMod(runtime, std::move(frontierWatchManifest),
+                                   *rdr2wasm::FindGuestProfile("lua"));
+    if (!frontierWatchMod.LoadEntrypoint()) return 60;
+    if (!frontierWatchMod.Tick()) return 61;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x78, true);
+    if (!frontierWatchMod.Tick()) return 62;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x78, false);
+    if (!frontierWatchMod.Tick()) return 63;
+    for (int tick = 0; tick < 120; ++tick) {
+        if (!frontierWatchMod.Tick()) return 64;
+    }
+    rdr2wasm::bindings::SetKeyStateForTesting(0x78, true);
+    if (!frontierWatchMod.Tick()) return 65;
+    rdr2wasm::bindings::SetKeyStateForTesting(0x78, false);
+    if (!frontierWatchMod.Tick()) return 66;
     return 0;
 }

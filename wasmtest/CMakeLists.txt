@@ -18,6 +18,7 @@ file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/example-mod" WASM_EXAMPLE_MOD_
 file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/javy-trainer" WASM_JAVY_MOD_PATH)
 file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/dotnet-example" WASM_DOTNET_MOD_PATH)
 file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/lua-example" WASM_LUA_MOD_PATH)
+file(TO_CMAKE_PATH "${RDRHOOK_SHARED}/static/mods/frontier-watch" WASM_FRONTIER_WATCH_MOD_PATH)
 
 target_include_directories(${PROJECT_NAME} PRIVATE
   ../rdrhook/src
@@ -29,6 +30,7 @@ target_compile_definitions(${PROJECT_NAME} PRIVATE
   WASM_JAVY_MOD_PATH="${WASM_JAVY_MOD_PATH}"
   WASM_DOTNET_MOD_PATH="${WASM_DOTNET_MOD_PATH}"
   WASM_LUA_MOD_PATH="${WASM_LUA_MOD_PATH}"
+  WASM_FRONTIER_WATCH_MOD_PATH="${WASM_FRONTIER_WATCH_MOD_PATH}"
   RDR2_WASM_TEST
   UNICODE
   _UNICODE

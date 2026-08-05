@@ -1,0 +1,13 @@
+[mod]
+name = "Frontier Watch"
+version = "1.0.0"
+author = "RDR2 Script Hook"
+description = "A live Lua-powered trail ledger and session dashboard"
+entrypoint = "main.wasm"
+runtime = "lua"
+
+[[input.bindings]]
+id = "toggle_frontier_watch"
+description = "Open/close Frontier Watch"
+mapper = "keyboard"
+default = "F9"
